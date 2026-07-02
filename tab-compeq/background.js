@@ -1,8 +1,12 @@
 import { MSG, TARGET } from "./shared/messages.js";
 import { DEFAULT_DSP, EQ_BANDS } from "./shared/defaults.js";
-import { normalizeCompressor, validateCompressor } from "./audio/compressor.js";
+import {
+  AUDIO_MODES,
+  normalizeCompressor,
+  validateCompressor,
+} from "./audio/compressor.js";
 
-const DEBUG = true;
+const DEBUG = false;
 const OFFSCREEN_URL = "offscreen.html";
 const STORAGE_KEY = "dsp";
 
@@ -12,6 +16,7 @@ let state = {
   hostname: null,
   gain: DEFAULT_DSP.gain,
   width: DEFAULT_DSP.width,
+  eqEnabled: DEFAULT_DSP.eqEnabled,
   eq: { ...DEFAULT_DSP.eq },
   compressor: { ...DEFAULT_DSP.compressor },
   limiter: { ...DEFAULT_DSP.limiter },
@@ -22,7 +27,7 @@ let state = {
 const ready = loadSettings();
 
 function debug(...args) {
-  if (DEBUG) console.log("[TabCompEQ]", ...args);
+  if (DEBUG) console.log("[TabTone]", ...args);
 }
 
 function sendState() {
@@ -61,6 +66,7 @@ async function saveSettings() {
     [STORAGE_KEY]: {
       gain: state.gain,
       width: state.width,
+      eqEnabled: state.eqEnabled,
       eq: state.eq,
       compressor: state.compressor,
       limiter: state.limiter,
@@ -154,6 +160,7 @@ async function startCapture() {
     streamId,
     gain: state.gain,
     width: state.width,
+    eqEnabled: state.eqEnabled,
     eq: state.eq,
     compressor: state.compressor,
     limiter: state.limiter,
@@ -257,6 +264,21 @@ async function setWidth(width) {
   return state;
 }
 
+async function setEqEnabled(eqEnabled) {
+  if (typeof eqEnabled !== "boolean")
+    throw new Error("EQ enabled must be boolean.");
+
+  setState({ eqEnabled, error: null }, false);
+  await saveSettings();
+
+  if (state.active) {
+    const response = await sendToOffscreen({ type: MSG.SET_EQ_ENABLED, eqEnabled });
+    if (response?.type === MSG.ERROR) throw new Error(response.error);
+  }
+
+  return state;
+}
+
 async function setEq(band, patch) {
   if (!state.eq[band]) throw new Error(`Unknown EQ band: ${band}`);
   const next = { ...state.eq[band], ...(patch ?? {}) };
@@ -268,6 +290,8 @@ async function setEq(band, patch) {
     throw new Error("EQ Q must be between 0.1 and 18.");
   if (!["peaking", "lowshelf", "highshelf"].includes(next.type))
     throw new Error("EQ type must be peaking, lowshelf, or highshelf.");
+  if (!AUDIO_MODES.includes(next.mode))
+    throw new Error("EQ mode must be stereo, mid, or side.");
   if (typeof next.solo !== "boolean")
     throw new Error("EQ solo must be boolean.");
 
@@ -344,6 +368,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message?.type === MSG.RESET_CAPTURE) return await resetCapture();
       if (message?.type === MSG.SET_GAIN) return await setGain(message.gain);
       if (message?.type === MSG.SET_WIDTH) return await setWidth(message.width);
+      if (message?.type === MSG.SET_EQ_ENABLED)
+        return await setEqEnabled(message.eqEnabled);
       if (message?.type === MSG.SET_EQ)
         return await setEq(message.band, message.patch);
       if (message?.type === MSG.SET_COMPRESSOR)

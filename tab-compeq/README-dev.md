@@ -1,4 +1,6 @@
-# ChromiumDSP / TabCompEQ
+<img src="assets/logo.svg" alt="Tab Tone logo" width="620">
+
+# ChromiumDSP / Tab Tone
 
 Milestone 9 captures the active tab, routes audio through five-band EQ, shows FFT data on the EQ canvas, and supports basic EQ node editing.
 

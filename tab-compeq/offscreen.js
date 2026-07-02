@@ -1,22 +1,36 @@
 import { MSG, TARGET } from "./shared/messages.js";
 import { DEFAULT_DSP, EQ_BANDS } from "./shared/defaults.js";
+import { createEqNode } from "./audio/eq.js";
+import { createMidSide } from "./audio/mid-side.js";
 
-const DEBUG = true;
+const DEBUG = false;
 
 let audioContext = null;
 let stream = null;
 let source = null;
 let gainNode = null;
+let compressorStageInputNode = null;
 let compressorInputGainNode = null;
-let compressorNode = null;
+let compressorManualGainNode = null;
 let compressorOutputGainNode = null;
 let compressorDryGainNode = null;
 let compressorWetGainNode = null;
 let compressorMixNode = null;
+let compressorGraph = null;
 let limiterInputGainNode = null;
 let limiterNode = null;
 let compressorEnabled = DEFAULT_DSP.compressor.enabled;
+let compressorMode = DEFAULT_DSP.compressor.mode;
+let compressorThreshold = DEFAULT_DSP.compressor.threshold;
+let compressorKnee = DEFAULT_DSP.compressor.knee;
+let compressorRatio = DEFAULT_DSP.compressor.ratio;
+let compressorAttack = DEFAULT_DSP.compressor.attack / 1000;
+let compressorRelease = DEFAULT_DSP.compressor.release / 1000;
+let compressorManualGrDb = 0;
+let limiterThreshold = DEFAULT_DSP.limiter.threshold;
+let limiterGain = 1;
 let width = DEFAULT_DSP.width;
+let eqEnabled = DEFAULT_DSP.eqEnabled;
 let widthNodes = null;
 let eqNodes = {};
 let eqState = { ...DEFAULT_DSP.eq };
@@ -36,82 +50,29 @@ function clampWidth(value) {
 }
 
 function debug(...args) {
-  if (DEBUG) console.log("[TabCompEQ]", ...args);
-}
-
-function clampEqGain(value) {
-  return Math.min(Math.max(value, -12), 12);
-}
-
-function shelfCoefficients(settings) {
-  const gain = clampEqGain(settings.gain);
-  const a = 10 ** (gain / 40);
-  const w0 =
-    (2 *
-      Math.PI *
-      Math.min(Math.max(settings.freq, 20), audioContext.sampleRate / 2 - 1)) /
-    audioContext.sampleRate;
-  const cos = Math.cos(w0);
-  const sin = Math.sin(w0);
-  const alpha = sin / (2 * Math.min(Math.max(settings.q, 0.1), 18));
-  const beta = 2 * Math.sqrt(a) * alpha;
-  let b0;
-  let b1;
-  let b2;
-  let a0;
-  let a1;
-  let a2;
-
-  if (settings.type === "lowshelf") {
-    b0 = a * (a + 1 - (a - 1) * cos + beta);
-    b1 = 2 * a * (a - 1 - (a + 1) * cos);
-    b2 = a * (a + 1 - (a - 1) * cos - beta);
-    a0 = a + 1 + (a - 1) * cos + beta;
-    a1 = -2 * (a - 1 + (a + 1) * cos);
-    a2 = a + 1 + (a - 1) * cos - beta;
-  } else {
-    b0 = a * (a + 1 + (a - 1) * cos + beta);
-    b1 = -2 * a * (a - 1 + (a + 1) * cos);
-    b2 = a * (a + 1 + (a - 1) * cos - beta);
-    a0 = a + 1 - (a - 1) * cos + beta;
-    a1 = 2 * (a - 1 - (a + 1) * cos);
-    a2 = a + 1 - (a - 1) * cos - beta;
-  }
-
-  return {
-    feedforward: [b0 / a0, b1 / a0, b2 / a0],
-    feedback: [1, a1 / a0, a2 / a0],
-  };
+  if (DEBUG) console.log("[TabTone]", ...args);
 }
 
 function disconnectEqNode(node) {
-  for (const item of node.nodes) item.disconnect();
+  node.output.disconnect();
 }
 
-function createEqNode(settings) {
-  if (settings.type !== "peaking") {
-    const { feedforward, feedback } = shelfCoefficients(settings);
-    return { nodes: [audioContext.createIIRFilter(feedforward, feedback)] };
-  }
-
-  const node = audioContext.createBiquadFilter();
-  node.type = "peaking";
-  node.frequency.value = settings.freq;
-  node.gain.value = clampEqGain(settings.gain);
-  node.Q.value = settings.q;
-  return { nodes: [node] };
+function destroyEqNode(node) {
+  for (const item of node.nodes) item.disconnect();
 }
 
 function disconnectGraph() {
   source?.disconnect();
   for (const node of Object.values(eqNodes)) disconnectEqNode(node);
   soloNode?.disconnect();
+  compressorStageInputNode?.disconnect();
   compressorInputGainNode?.disconnect();
-  compressorNode?.disconnect();
+  compressorManualGainNode?.disconnect();
   compressorOutputGainNode?.disconnect();
   compressorDryGainNode?.disconnect();
   compressorWetGainNode?.disconnect();
   compressorMixNode?.disconnect();
+  compressorGraph?.nodes?.forEach((node) => node.disconnect());
   limiterInputGainNode?.disconnect();
   limiterNode?.disconnect();
   inputAnalyserNode?.disconnect();
@@ -122,7 +83,10 @@ function disconnectGraph() {
 }
 
 function connectOutput() {
-  gainNode.connect(analyserNode);
+  gainNode.connect(limiterInputGainNode);
+  limiterInputGainNode.connect(limiterAnalyserNode);
+  limiterAnalyserNode.connect(limiterNode);
+  limiterNode.connect(analyserNode);
   analyserNode.connect(audioContext.destination);
 }
 
@@ -142,7 +106,8 @@ function connectGraph() {
   if (
     !source ||
     !gainNode ||
-    !compressorNode ||
+    !compressorStageInputNode ||
+    !compressorManualGainNode ||
     !widthNodes ||
     !inputAnalyserNode ||
     !compressorAnalyserNode ||
@@ -154,27 +119,48 @@ function connectGraph() {
 
   disconnectGraph();
   let processed = source.connect(inputAnalyserNode);
-  for (const band of EQ_BANDS) {
-    const node = eqNodes[band.id];
-    for (const item of node.nodes) processed = processed.connect(item);
+  if (eqEnabled) {
+    for (const band of EQ_BANDS) {
+      const node = eqNodes[band.id];
+      processed.connect(node.input);
+      processed = node.output;
+    }
+    if (applySolo()) processed = processed.connect(soloNode);
   }
-  if (applySolo()) processed = processed.connect(soloNode);
   let lastProcessor = processed;
-  lastProcessor = lastProcessor.connect(compressorAnalyserNode);
   if (compressorEnabled) {
-    lastProcessor.connect(compressorDryGainNode);
-    lastProcessor = lastProcessor.connect(compressorInputGainNode);
-    lastProcessor = lastProcessor.connect(compressorNode);
-    lastProcessor = lastProcessor.connect(compressorOutputGainNode);
-    lastProcessor = lastProcessor.connect(compressorWetGainNode);
-    compressorDryGainNode.connect(compressorMixNode);
-    lastProcessor.connect(compressorMixNode);
-    lastProcessor = compressorMixNode;
+    compressorStageInputNode
+      .connect(compressorDryGainNode)
+      .connect(compressorMixNode);
+    compressorStageInputNode
+      .connect(compressorManualGainNode)
+      .connect(compressorWetGainNode)
+      .connect(compressorMixNode);
+    compressorGraph = createMidSide(
+      audioContext,
+      {
+        input: compressorStageInputNode,
+        output: compressorMixNode,
+        nodes: [
+          compressorStageInputNode,
+          compressorManualGainNode,
+          compressorDryGainNode,
+          compressorWetGainNode,
+          compressorMixNode,
+        ],
+      },
+      compressorMode,
+    );
+    lastProcessor.connect(compressorInputGainNode).connect(compressorGraph.input);
+    const compressorAnalyserSource =
+      compressorMode === "stereo"
+        ? compressorInputGainNode
+        : compressorGraph[compressorMode];
+    compressorAnalyserSource.connect(compressorAnalyserNode);
+    lastProcessor = compressorGraph.output.connect(compressorOutputGainNode);
+  } else {
+    lastProcessor.connect(compressorAnalyserNode);
   }
-
-  lastProcessor = lastProcessor.connect(limiterInputGainNode);
-  lastProcessor = lastProcessor.connect(limiterAnalyserNode);
-  lastProcessor = lastProcessor.connect(limiterNode);
 
   if (width === 1) {
     lastProcessor.connect(gainNode);
@@ -222,26 +208,27 @@ function applyWidth(value) {
 
 function applyCompressor(settings) {
   compressorEnabled = settings.enabled;
-  if (!compressorNode) return;
+  compressorMode = settings.mode ?? "stereo";
+  if (!compressorManualGainNode) return;
+  compressorThreshold = settings.threshold;
+  compressorKnee = settings.knee;
+  compressorRatio = settings.ratio;
+  compressorAttack = settings.attack / 1000;
+  compressorRelease = settings.release / 1000;
   compressorInputGainNode.gain.value = settings.inputGain;
   compressorOutputGainNode.gain.value = settings.outputGain;
   compressorDryGainNode.gain.value = 1 - settings.wetMix;
   compressorWetGainNode.gain.value = settings.wetMix;
-  compressorNode.threshold.value = settings.threshold;
-  compressorNode.knee.value = settings.knee;
-  compressorNode.ratio.value = settings.ratio;
-  compressorNode.attack.value = settings.attack / 1000;
-  compressorNode.release.value = settings.release / 1000;
+  if (!settings.enabled) {
+    compressorManualGrDb = 0;
+    compressorManualGainNode.gain.value = 1;
+  }
 }
 
 function applyLimiter(settings) {
   if (!limiterNode) return;
   limiterInputGainNode.gain.value = settings.inputGain;
-  limiterNode.threshold.value = settings.threshold;
-  limiterNode.knee.value = 0;
-  limiterNode.ratio.value = 20;
-  limiterNode.attack.value = 0.001;
-  limiterNode.release.value = 0.05;
+  limiterThreshold = settings.threshold;
 }
 
 function setGain(value) {
@@ -256,12 +243,19 @@ function setWidth(value) {
   return { type: MSG.STATE_UPDATE, width };
 }
 
+function setEqEnabled(value) {
+  eqEnabled = value;
+  connectGraph();
+  return { type: MSG.STATE_UPDATE, eqEnabled };
+}
+
 function setEq(band, patch) {
   const node = eqNodes[band];
   if (!node) return { type: MSG.ERROR, error: `Unknown EQ band: ${band}` };
   eqState = { ...eqState, [band]: patch };
   disconnectGraph();
-  eqNodes = { ...eqNodes, [band]: createEqNode(patch) };
+  destroyEqNode(node);
+  eqNodes = { ...eqNodes, [band]: createEqNode(audioContext, patch) };
   connectGraph();
   return { type: MSG.STATE_UPDATE, band, patch };
 }
@@ -279,14 +273,14 @@ function startAnalyser() {
     compressorAnalyserNode.getByteTimeDomainData(comp);
     limiterAnalyserNode.getByteTimeDomainData(limiter);
     analyserNode.getByteTimeDomainData(output);
-    let inputSum = 0;
+    let inputPeak = 0;
     let compPeak = 0;
     let limiterPeak = 0;
-    let outputSum = 0;
+    let outputPeak = 0;
     for (let i = 0; i < input.length; i += 1) {
-      const inputSample = (input[i] - 128) / 128;
+      const inputSample = Math.abs((input[i] - 128) / 128);
       const compSample = Math.abs((comp[i] - 128) / 128);
-      inputSum += inputSample * inputSample;
+      inputPeak = Math.max(inputPeak, inputSample);
       compPeak = Math.max(compPeak, compSample);
     }
     for (const value of limiter) {
@@ -294,23 +288,46 @@ function startAnalyser() {
     }
     for (const value of output) {
       const outputSample = (value - 128) / 128;
-      outputSum += outputSample * outputSample;
+      outputPeak = Math.max(outputPeak, Math.abs(outputSample));
     }
+    const ceiling = 10 ** (limiterThreshold / 20);
+    const targetGain = limiterPeak > ceiling ? ceiling / limiterPeak : 1;
+    limiterGain = Math.min(targetGain, limiterGain + 0.08);
+    limiterNode.gain.setTargetAtTime(limiterGain, audioContext.currentTime, 0.005);
+    let compGrDb = 0;
+    if (compressorEnabled) {
+      const compLevelDb = 20 * Math.log10(compPeak || 0.000001);
+      const over = compLevelDb - compressorThreshold;
+      if (
+        compressorKnee > 0 &&
+        over > -compressorKnee / 2 &&
+        over < compressorKnee / 2
+      ) {
+        compGrDb =
+          ((1 - 1 / compressorRatio) * (over + compressorKnee / 2) ** 2) /
+          (2 * compressorKnee);
+      } else {
+        compGrDb = over > 0 ? over * (1 - 1 / compressorRatio) : 0;
+      }
+      compressorManualGainNode.gain.setTargetAtTime(
+        10 ** (-compGrDb / 20),
+        audioContext.currentTime,
+        compGrDb > compressorManualGrDb ? compressorAttack : compressorRelease,
+      );
+      compressorManualGrDb = compGrDb;
+    }
+    const limiterGrDb = -20 * Math.log10(limiterGain || 0.000001);
     chrome.runtime
       .sendMessage({
         type: MSG.ANALYZER_DATA,
         bins: Array.from(data),
-        inputDb: 20 * Math.log10(Math.sqrt(inputSum / input.length) || 0.000001),
-        outputDb: 20 * Math.log10(
-          Math.sqrt(outputSum / output.length) || 0.000001,
-        ),
+        inputDb: 20 * Math.log10(inputPeak || 0.000001),
+        outputDb: 20 * Math.log10(outputPeak || 0.000001),
         compDb: 20 * Math.log10(compPeak || 0.000001),
-        limiterDb: 20 * Math.log10(limiterPeak || 0.000001),
-        compGrDb: compressorEnabled ? Math.abs(compressorNode.reduction) : 0,
-        limiterGrDb: Math.abs(limiterNode.reduction),
-        grDb:
-          (compressorEnabled ? Math.abs(compressorNode.reduction) : 0) +
-          Math.abs(limiterNode.reduction),
+        limiterDb: 20 * Math.log10(outputPeak || 0.000001),
+        compGrDb,
+        limiterGrDb,
+        grDb: compGrDb + limiterGrDb,
       })
       .catch(() => {});
   }, 50);
@@ -328,15 +345,17 @@ function setLimiter(settings) {
   return { type: MSG.STATE_UPDATE };
 }
 
-async function startCapture(streamId, gain, initialWidth, eq, compressor, limiter) {
+async function startCapture(streamId, gain, initialWidth, initialEqEnabled, eq, compressor, limiter) {
   await stopCapture();
 
   debug("graph creation");
   audioContext = new AudioContext();
+  limiterGain = 1;
+  eqEnabled = initialEqEnabled ?? DEFAULT_DSP.eqEnabled;
   eqState = { ...DEFAULT_DSP.eq, ...eq };
   eqNodes = Object.fromEntries(
     EQ_BANDS.map((band) => {
-      return [band.id, createEqNode(eqState[band.id])];
+      return [band.id, createEqNode(audioContext, eqState[band.id])];
     }),
   );
   soloNode = audioContext.createBiquadFilter();
@@ -349,14 +368,15 @@ async function startCapture(streamId, gain, initialWidth, eq, compressor, limite
   compressorAnalyserNode.fftSize = 2048;
   limiterAnalyserNode.fftSize = 2048;
   analyserNode.smoothingTimeConstant = 0.82;
-  compressorNode = audioContext.createDynamicsCompressor();
+  compressorManualGainNode = audioContext.createGain();
+  compressorStageInputNode = audioContext.createGain();
   compressorInputGainNode = audioContext.createGain();
   compressorOutputGainNode = audioContext.createGain();
   compressorDryGainNode = audioContext.createGain();
   compressorWetGainNode = audioContext.createGain();
   compressorMixNode = audioContext.createGain();
   limiterInputGainNode = audioContext.createGain();
-  limiterNode = audioContext.createDynamicsCompressor();
+  limiterNode = audioContext.createGain();
   applyCompressor(compressor ?? DEFAULT_DSP.compressor);
   applyLimiter(limiter ?? DEFAULT_DSP.limiter);
   widthNodes = createWidthNodes();
@@ -394,9 +414,14 @@ async function stopCapture() {
     source = null;
   }
 
-  if (compressorNode) {
-    compressorNode.disconnect();
-    compressorNode = null;
+  if (compressorManualGainNode) {
+    compressorManualGainNode.disconnect();
+    compressorManualGainNode = null;
+  }
+
+  if (compressorStageInputNode) {
+    compressorStageInputNode.disconnect();
+    compressorStageInputNode = null;
   }
 
   if (compressorInputGainNode) {
@@ -423,6 +448,9 @@ async function stopCapture() {
     compressorMixNode.disconnect();
     compressorMixNode = null;
   }
+
+  compressorGraph?.nodes?.forEach((node) => node.disconnect());
+  compressorGraph = null;
 
   if (limiterInputGainNode) {
     limiterInputGainNode.disconnect();
@@ -469,7 +497,7 @@ async function stopCapture() {
     widthNodes = null;
   }
 
-  for (const node of Object.values(eqNodes)) disconnectEqNode(node);
+  for (const node of Object.values(eqNodes)) destroyEqNode(node);
   eqNodes = {};
 
   if (stream) {
@@ -501,6 +529,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           message.streamId,
           message.gain,
           message.width,
+          message.eqEnabled,
           message.eq,
           message.compressor,
           message.limiter,
@@ -508,6 +537,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message?.type === MSG.STOP_CAPTURE) return await stopCapture();
       if (message?.type === MSG.SET_GAIN) return setGain(message.gain);
       if (message?.type === MSG.SET_WIDTH) return setWidth(message.width);
+      if (message?.type === MSG.SET_EQ_ENABLED)
+        return setEqEnabled(message.eqEnabled);
       if (message?.type === MSG.SET_EQ)
         return setEq(message.band, message.patch);
       if (message?.type === MSG.SET_COMPRESSOR)

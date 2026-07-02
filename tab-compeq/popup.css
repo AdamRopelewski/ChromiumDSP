@@ -1,19 +1,23 @@
 :root {
   color-scheme: dark;
-  --bg: #09090b;
-  --panel: #121217;
-  --panel-soft: #18181f;
-  --line: #2a2a33;
-  --text: #f4f4f5;
-  --muted: #a1a1aa;
+  --bg: #0e1013;
+  --panel: #151820;
+  --panel-soft: #1a1c24;
+  --line: #2d3038;
+  --text: #e7eaf0;
+  --muted: #9aa3b2;
   --blue: #38bdf8;
-  --green: #34d399;
-  --amber: #f59e0b;
-  --red: #f87171;
+  --green: #22c55e;
+  --amber: #eab308;
+  --red: #ef4444;
 }
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  overflow: hidden;
 }
 
 [hidden] {
@@ -30,7 +34,7 @@ body {
     system-ui,
     sans-serif;
   color: var(--text);
-  background: radial-gradient(circle at 50% 0%, #182033, var(--bg) 58%);
+  background: var(--bg);
 }
 
 .app-shell {
@@ -49,6 +53,25 @@ body {
 .top-bar {
   align-items: center;
   justify-content: space-between;
+}
+
+.brand-button {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-color: #2fc7ff;
+  border-radius: 14px;
+  background: #0b1018;
+}
+
+.brand-button img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.brand-copy {
+  margin-right: auto;
 }
 
 h1,
@@ -83,16 +106,16 @@ h1 {
 
 .status-pill.capturing {
   border-color: var(--red);
-  color: #fecaca;
-  background: rgba(248, 113, 113, 0.18);
+  color: #e2b6b6;
+  background: #2a1f24;
 }
 
 button {
-  border: 1px solid #3f3f46;
+  border: 1px solid var(--line);
   border-radius: 999px;
   padding: 7px 12px;
   color: var(--text);
-  background: #20202a;
+  background: #20242e;
   cursor: pointer;
 }
 
@@ -102,25 +125,50 @@ button:disabled {
 }
 
 .ghost {
-  border-color: #52525b;
+  border-color: var(--line);
   background: transparent;
 }
 
 .stage-tabs {
   margin: 10px 0 8px;
+  align-items: center;
 }
 
 .stage-tab {
-  flex: 1;
+  flex: 0 0 auto;
   border-radius: 12px;
   color: var(--muted);
   background: var(--panel);
 }
 
+.stage-static,
+.chain-arrow {
+  color: var(--muted);
+}
+
+.stage-static {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #171a21;
+}
+
 .stage-tab.active {
   color: var(--text);
-  border-color: #0ea5e9;
-  background: linear-gradient(180deg, #164e63, #111827);
+  border-color: #465469;
+  background: #202632;
+}
+
+.stage-tab.stage-on {
+  border-color: #166534;
+  color: #bbf7d0;
+  background: #102018;
+}
+
+.stage-tab.stage-off {
+  border-color: #7f1d1d;
+  color: #fecaca;
+  background: #241313;
 }
 
 .workbench {
@@ -139,11 +187,7 @@ button:disabled {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: linear-gradient(
-    180deg,
-    rgba(14, 165, 233, 0.13),
-    rgba(9, 9, 11, 0.9)
-  );
+  background: #111318;
 }
 
 .analyzer-grid {
@@ -166,7 +210,7 @@ button:disabled {
 .eq-toolbar {
   position: absolute;
   top: 10px;
-  right: 10px;
+  left: 10px;
   display: flex;
   gap: 6px;
 }
@@ -195,9 +239,6 @@ button:disabled {
 .f10k {
   left: 89%;
 }
-.f20k {
-  right: 3%;
-}
 
 .side-panel {
   display: flex;
@@ -205,7 +246,6 @@ button:disabled {
   gap: 10px;
 }
 
-.meters,
 .band-panel {
   padding: 8px;
   border: 1px solid var(--line);
@@ -213,57 +253,41 @@ button:disabled {
   background: var(--panel);
 }
 
-.meters {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
-}
-
 .band-panel {
   display: grid;
   gap: 6px;
 }
 
-.meter {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  width: 38px;
-  color: var(--muted);
-  font-size: 10px;
+.meter-panel {
+  gap: 8px;
 }
 
 .meter-track {
-  position: relative;
-  width: 8px;
-  height: 128px;
+  display: block;
+  height: 8px;
+  margin-top: 4px;
   overflow: hidden;
   border-radius: 999px;
-  background: #27272f;
+  background: #0b0d12;
 }
 
 .meter-fill {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  display: block;
+  width: 0%;
+  height: 100%;
   border-radius: inherit;
-  background: linear-gradient(0deg, var(--green), var(--amber), var(--red));
+  background: var(--green);
 }
 
-.low-level {
-  height: 48%;
+.meter-fill.yellow {
+  background: var(--amber);
 }
-.mid-level {
-  height: 64%;
-}
-.gr-level {
-  height: 24%;
+
+.meter-fill.red,
+.meter-fill.gr {
   background: var(--red);
 }
 
-.error,
 .error {
   min-height: 1.2em;
   margin: 10px 0 0;
@@ -319,7 +343,7 @@ select {
   width: 100%;
   margin-top: 3px;
   color: var(--text);
-  background: #20202a;
+  background: #20242e;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 5px;

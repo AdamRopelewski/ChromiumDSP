@@ -9,6 +9,7 @@ export const EQ_BANDS = [
 export const DEFAULT_DSP = {
   gain: 1,
   width: 1,
+  eqEnabled: true,
   eq: Object.fromEntries(
     EQ_BANDS.map((band) => [
       band.id,
@@ -17,6 +18,7 @@ export const DEFAULT_DSP = {
         gain: 0,
         q: 0.7,
         type: band.type,
+        mode: "stereo",
         solo: false,
       },
     ]),
@@ -31,6 +33,7 @@ export const DEFAULT_DSP = {
     attack: 1,
     release: 250,
     wetMix: 1,
+    mode: "stereo",
   },
   limiter: {
     inputGain: 1,

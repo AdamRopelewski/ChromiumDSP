@@ -9,6 +9,8 @@ export const COMPRESSOR_LIMITS = {
   wetMix: [0, 1],
 };
 
+export const AUDIO_MODES = ["stereo", "mid", "side"];
+
 export function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -94,6 +96,8 @@ export function validateCompressor(compressor) {
   ];
   if (typeof compressor.enabled !== "boolean")
     throw new Error("Compressor enabled must be boolean.");
+  if (!AUDIO_MODES.includes(compressor.mode))
+    throw new Error("Compressor mode must be stereo, mid, or side.");
   for (const [value, min, max, message] of checks) {
     if (!Number.isFinite(value) || value < min || value > max)
       throw new Error(`Compressor ${message}.`);

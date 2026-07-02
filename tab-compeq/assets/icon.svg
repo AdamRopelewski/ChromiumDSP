@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">TabTone small icon</title>
+  <desc id="desc">Minimal audio fader icon for a browser audio extension.</desc>
+  <rect x="12" y="12" width="104" height="104" rx="26" fill="#0b1018" stroke="#2fc7ff" stroke-width="8"/>
+  <path d="M36 34V94" stroke="#eaf6ff" stroke-width="9" stroke-linecap="round"/>
+  <path d="M64 34V94" stroke="#eaf6ff" stroke-width="9" stroke-linecap="round"/>
+  <path d="M92 34V94" stroke="#eaf6ff" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="36" cy="73" r="11" fill="#0b1018" stroke="#2fc7ff" stroke-width="7"/>
+  <circle cx="64" cy="55" r="11" fill="#0b1018" stroke="#2fc7ff" stroke-width="7"/>
+  <circle cx="92" cy="82" r="11" fill="#0b1018" stroke="#2fc7ff" stroke-width="7"/>
+</svg>

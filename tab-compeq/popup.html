@@ -3,14 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>TabCompEQ</title>
+    <title>Tab Tone</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <main class="app-shell">
       <header class="top-bar">
-        <div>
-          <h1>TabCompEQ</h1>
+        <button id="brand-button" class="brand-button" type="button" aria-label="Start capture">
+          <img src="assets/icon.svg" alt="" />
+        </button>
+        <div class="brand-copy">
+          <h1>Tab Tone</h1>
           <p class="host">Host <span id="hostname">-</span></p>
         </div>
         <div class="transport">
@@ -21,16 +24,22 @@
         </div>
       </header>
 
-      <nav class="stage-tabs" aria-label="DSP stages">
-        <button class="stage-tab active" type="button" data-stage="eq">
-          1 EQ
+      <nav class="stage-tabs" aria-label="DSP chain">
+        <span class="stage-static">Input</span>
+        <span class="chain-arrow">→</span>
+        <button id="chain-eq-stage" class="stage-tab stage-on active" type="button" data-stage="eq">
+          EQ ON
         </button>
-        <button class="stage-tab" type="button" data-stage="comp">
-          2 Comp
+        <span class="chain-arrow">→</span>
+        <button id="chain-comp-stage" class="stage-tab stage-off" type="button" data-stage="comp">
+          Comp OFF
         </button>
-        <button class="stage-tab" type="button" data-stage="limiter">
-          3 Limiter
+        <span class="chain-arrow">→</span>
+        <button class="stage-tab stage-on" type="button" data-stage="limiter">
+          Limiter ON
         </button>
+        <span class="chain-arrow">→</span>
+        <span class="stage-static">Output</span>
       </nav>
 
       <section class="workbench">
@@ -56,12 +65,14 @@
               <span class="freq f100">100</span>
               <span class="freq f1k">1k</span>
               <span class="freq f10k">10k</span>
-              <span class="freq f20k">20k</span>
             </div>
           </section>
 
           <fieldset class="stage-panel active" data-panel="eq">
             <legend>EQ Stage</legend>
+            <label class="toggle-row">
+              <input id="eq-enabled" type="checkbox" checked /> Enabled
+            </label>
             <label>
               Input Gain: <span id="gain-value">0.0</span>dB
               <input
@@ -90,6 +101,14 @@
             <legend>Compressor Stage</legend>
             <label class="toggle-row">
               <input id="compressor-enabled" type="checkbox" /> Enabled
+            </label>
+            <label>
+              Mode
+              <select id="compressor-mode">
+                <option value="stereo">Stereo</option>
+                <option value="mid">Mid</option>
+                <option value="side">Side</option>
+              </select>
             </label>
             <label>
               Threshold: <span id="compressor-threshold-value">-24</span>dB
@@ -161,29 +180,20 @@
         </section>
 
         <aside class="side-panel">
-          <div class="meters" aria-label="Meters placeholder">
-            <div class="meter">
-              <span>In</span>
-              <div class="meter-track">
-                <div id="meter-in" class="meter-fill low-level"></div>
-              </div>
-              <span id="meter-in-value">-60 dB</span>
-            </div>
-            <div class="meter">
-              <span>Out</span>
-              <div class="meter-track">
-                <div id="meter-out" class="meter-fill mid-level"></div>
-              </div>
-              <span id="meter-out-value">-60 dB</span>
-            </div>
-            <div class="meter">
-              <span>GR</span>
-              <div class="meter-track">
-                <div id="meter-gr" class="meter-fill gr-level"></div>
-              </div>
-              <span id="meter-gr-value">0 dB</span>
-            </div>
-          </div>
+          <section class="band-panel meter-panel" aria-label="Global meters">
+            <label>
+              Input peak: <span id="global-input-meter-value">-inf</span>dB
+              <span class="meter-track"><span id="global-input-meter" class="meter-fill"></span></span>
+            </label>
+            <label>
+              Output peak: <span id="global-output-meter-value">-inf</span>dB
+              <span class="meter-track"><span id="global-output-meter" class="meter-fill"></span></span>
+            </label>
+            <label>
+              Total GR: <span id="global-gr-meter-value">0.0</span>dB
+              <span class="meter-track"><span id="global-gr-meter" class="meter-fill gr"></span></span>
+            </label>
+          </section>
           <section id="comp-gain-panel" class="band-panel" hidden>
             <label>
               Input: <span id="compressor-input-gain-value">0.0</span>dB
@@ -220,6 +230,14 @@
                 <option value="peaking">Peaking</option>
                 <option value="lowshelf">Low Shelf</option>
                 <option value="highshelf">High Shelf</option>
+              </select>
+            </label>
+            <label>
+              Mode
+              <select id="eq-mode">
+                <option value="stereo">Stereo</option>
+                <option value="mid">Mid</option>
+                <option value="side">Side</option>
               </select>
             </label>
             <label>
