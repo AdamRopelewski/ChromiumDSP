@@ -1,0 +1,7 @@
+- [] remove v-scroll bar in the COMP tab
+- [] add reset button per tab
+- [] add change Q then mouse hover above EQ band
+- Delete `Limited Analyzer` etc. from top left
+- Delete 0dB form top left, draw it above the curves
+- Change Icon when *Tab Tone* active
+- 
