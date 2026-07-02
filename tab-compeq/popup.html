@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TabCompEQ</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="top-bar">
+        <div>
+          <h1>TabCompEQ</h1>
+          <p class="host">Host <span id="hostname">-</span></p>
+        </div>
+        <div class="transport">
+          <span id="status" class="status-pill">inactive</span>
+          <button id="start" type="button">Start</button>
+          <button id="stop" type="button">Stop</button>
+          <button id="reset" class="ghost" type="button" hidden>Reset</button>
+        </div>
+      </header>
+
+      <nav class="stage-tabs" aria-label="DSP stages">
+        <button class="stage-tab active" type="button" data-stage="eq">
+          1 EQ
+        </button>
+        <button class="stage-tab" type="button" data-stage="comp">
+          2 Comp
+        </button>
+        <button class="stage-tab" type="button" data-stage="limiter">
+          3 Limiter
+        </button>
+      </nav>
+
+      <section class="workbench">
+        <section class="eq-column">
+          <section class="analyzer-card" aria-label="EQ analyzer">
+            <div class="analyzer-grid">
+              <canvas id="eq-canvas" width="560" height="300"></canvas>
+              <div class="eq-toolbar">
+                <button id="eq-undo" class="ghost mini" type="button">
+                  Undo
+                </button>
+                <button id="eq-redo" class="ghost mini" type="button">
+                  Redo
+                </button>
+              </div>
+              <span class="freq f20">20</span>
+              <span class="freq f100">100</span>
+              <span class="freq f1k">1k</span>
+              <span class="freq f10k">10k</span>
+              <span class="freq f20k">20k</span>
+            </div>
+          </section>
+
+          <fieldset class="stage-panel active" data-panel="eq">
+            <legend>EQ Stage</legend>
+            <label>
+              Input Gain: <span id="gain-value">0.0</span>dB
+              <input
+                id="gain"
+                type="range"
+                min="-60"
+                max="6"
+                step="0.1"
+                value="0"
+              />
+            </label>
+            <label>
+              Width: <span id="width-value">1.00</span>x
+              <input
+                id="width"
+                type="range"
+                min="0"
+                max="2"
+                step="0.01"
+                value="1"
+              />
+            </label>
+          </fieldset>
+        </section>
+
+        <aside class="side-panel">
+          <div class="meters" aria-label="Meters placeholder">
+            <div class="meter">
+              <span>In</span>
+              <div class="meter-track">
+                <div class="meter-fill low-level"></div>
+              </div>
+            </div>
+            <div class="meter">
+              <span>Out</span>
+              <div class="meter-track">
+                <div class="meter-fill mid-level"></div>
+              </div>
+            </div>
+            <div class="meter">
+              <span>GR</span>
+              <div class="meter-track">
+                <div class="meter-fill gr-level"></div>
+              </div>
+            </div>
+          </div>
+          <section class="band-panel" aria-label="Selected EQ band">
+            <strong id="eq-band-name">Band 3</strong>
+            <label>
+              Type
+              <select id="eq-type">
+                <option value="peaking">Peaking</option>
+                <option value="lowshelf">Low Shelf</option>
+                <option value="highshelf">High Shelf</option>
+              </select>
+            </label>
+            <label>
+              Freq: <span id="eq-freq-value">1000</span>Hz
+              <input
+                id="eq-freq"
+                type="range"
+                min="0"
+                max="1"
+                step="0.001"
+                value="0.566"
+              />
+            </label>
+            <label>
+              Gain: <span id="eq-gain-value">0.0</span>dB
+              <input
+                id="eq-gain"
+                type="range"
+                min="-12"
+                max="12"
+                step="0.1"
+                value="0"
+              />
+            </label>
+            <label>
+              Q: <span id="eq-q-value">0.70</span>
+              <input
+                id="eq-q"
+                type="range"
+                min="0"
+                max="1"
+                step="0.001"
+                value="0.295"
+              />
+            </label>
+            <label class="toggle-row">
+              <input id="eq-solo" type="checkbox" /> Solo
+            </label>
+          </section>
+        </aside>
+      </section>
+
+      <p id="error" class="error" role="alert"></p>
+      <p id="fullscreen-note" class="fullscreen-note" hidden>
+        Chrome may limit native video fullscreen while tab capture is active.
+        Use browser fullscreen/F11 or process audio outside Chrome for normal
+        fullscreen.
+      </p>
+
+      <section class="controls-grid">
+        <fieldset class="stage-panel" data-panel="comp">
+          <legend>Compressor Stage</legend>
+          <label class="toggle-row">
+            <input id="compressor-enabled" type="checkbox" /> Enabled
+          </label>
+          <label>
+            Threshold: <span id="compressor-threshold-value">-24</span>dB
+            <input
+              id="compressor-threshold"
+              type="range"
+              min="-60"
+              max="0"
+              step="1"
+              value="-24"
+            />
+          </label>
+          <label>
+            Ratio: <span id="compressor-ratio-value">4.0</span>:1
+            <input
+              id="compressor-ratio"
+              type="range"
+              min="1"
+              max="20"
+              step="0.1"
+              value="4"
+            />
+          </label>
+        </fieldset>
+
+        <fieldset class="stage-panel" data-panel="limiter">
+          <legend>Limiter Stage</legend>
+          <p class="empty-stage">Limiter controls land in later milestone.</p>
+        </fieldset>
+      </section>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

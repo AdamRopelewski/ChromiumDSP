@@ -1,0 +1,315 @@
+:root {
+  color-scheme: dark;
+  --bg: #09090b;
+  --panel: #121217;
+  --panel-soft: #18181f;
+  --line: #2a2a33;
+  --text: #f4f4f5;
+  --muted: #a1a1aa;
+  --blue: #38bdf8;
+  --green: #34d399;
+  --amber: #f59e0b;
+  --red: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 760px;
+  margin: 0;
+  font:
+    13px Inter,
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 50% 0%, #182033, var(--bg) 58%);
+}
+
+.app-shell {
+  padding: 10px;
+}
+
+.top-bar,
+.transport,
+.stage-tabs,
+.workbench,
+.controls-grid {
+  display: flex;
+  gap: 10px;
+}
+
+.top-bar {
+  align-items: center;
+  justify-content: space-between;
+}
+
+h1,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 18px;
+  letter-spacing: 0.04em;
+}
+
+.host,
+.empty-stage {
+  color: var(--muted);
+}
+
+.transport {
+  align-items: center;
+}
+
+.status-pill {
+  min-width: 72px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  text-align: center;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+button {
+  border: 1px solid #3f3f46;
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: var(--text);
+  background: #20202a;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ghost {
+  border-color: #52525b;
+  background: transparent;
+}
+
+.stage-tabs {
+  margin: 10px 0 8px;
+}
+
+.stage-tab {
+  flex: 1;
+  border-radius: 12px;
+  color: var(--muted);
+  background: var(--panel);
+}
+
+.stage-tab.active {
+  color: var(--text);
+  border-color: #0ea5e9;
+  background: linear-gradient(180deg, #164e63, #111827);
+}
+
+.workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 178px;
+  align-items: start;
+}
+
+.eq-column {
+  display: grid;
+  gap: 8px;
+}
+
+.analyzer-card {
+  min-height: 300px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    rgba(14, 165, 233, 0.13),
+    rgba(9, 9, 11, 0.9)
+  );
+}
+
+.analyzer-grid {
+  position: relative;
+  height: 100%;
+}
+
+#eq-canvas {
+  display: block;
+  width: 100%;
+  height: 300px;
+  cursor: crosshair;
+}
+
+.eq-toolbar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 6px;
+}
+
+.mini {
+  padding: 4px 7px;
+  font-size: 11px;
+}
+
+.freq {
+  position: absolute;
+  bottom: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.f20 {
+  left: 3%;
+}
+.f100 {
+  left: 19%;
+}
+.f1k {
+  left: 48%;
+}
+.f10k {
+  left: 75%;
+}
+.f20k {
+  right: 3%;
+}
+
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.meters,
+.band-panel {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+}
+
+.meters {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.band-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.meter {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 22px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.meter-track {
+  position: relative;
+  width: 8px;
+  height: 160px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #27272f;
+}
+
+.meter-fill {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: inherit;
+  background: linear-gradient(0deg, var(--green), var(--amber), var(--red));
+}
+
+.low-level {
+  height: 48%;
+}
+.mid-level {
+  height: 64%;
+}
+.gr-level {
+  height: 24%;
+}
+
+.error,
+.fullscreen-note {
+  min-height: 1.2em;
+  margin: 10px 0 0;
+}
+
+.error {
+  color: var(--red);
+}
+
+.fullscreen-note {
+  color: var(--muted);
+}
+
+.controls-grid {
+  margin-top: 8px;
+  display: block;
+}
+
+.stage-panel {
+  display: none;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel-soft);
+}
+
+.stage-panel.active {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+legend {
+  padding: 0 6px;
+  color: var(--muted);
+}
+
+label {
+  display: block;
+  color: var(--muted);
+}
+
+.toggle-row {
+  align-self: center;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--blue);
+}
+
+input[type="checkbox"],
+select {
+  accent-color: var(--blue);
+}
+
+select {
+  width: 100%;
+  margin-top: 3px;
+  color: var(--text);
+  background: #20202a;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px;
+}

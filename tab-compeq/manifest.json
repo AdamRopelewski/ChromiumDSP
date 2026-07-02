@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "TabCompEQ",
+  "version": "0.1.0",
+  "description": "Per-tab EQ and compression for browser audio.",
+  "permissions": ["tabCapture", "offscreen", "storage", "activeTab", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "TabCompEQ",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
