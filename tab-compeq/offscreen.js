@@ -7,13 +7,23 @@ let audioContext = null;
 let stream = null;
 let source = null;
 let gainNode = null;
+let compressorInputGainNode = null;
 let compressorNode = null;
+let compressorOutputGainNode = null;
+let compressorDryGainNode = null;
+let compressorWetGainNode = null;
+let compressorMixNode = null;
+let limiterInputGainNode = null;
+let limiterNode = null;
 let compressorEnabled = DEFAULT_DSP.compressor.enabled;
 let width = DEFAULT_DSP.width;
 let widthNodes = null;
 let eqNodes = {};
 let eqState = { ...DEFAULT_DSP.eq };
 let soloNode = null;
+let inputAnalyserNode = null;
+let compressorAnalyserNode = null;
+let limiterAnalyserNode = null;
 let analyserNode = null;
 let analyserTimer = null;
 
@@ -96,14 +106,24 @@ function disconnectGraph() {
   source?.disconnect();
   for (const node of Object.values(eqNodes)) disconnectEqNode(node);
   soloNode?.disconnect();
+  compressorInputGainNode?.disconnect();
   compressorNode?.disconnect();
+  compressorOutputGainNode?.disconnect();
+  compressorDryGainNode?.disconnect();
+  compressorWetGainNode?.disconnect();
+  compressorMixNode?.disconnect();
+  limiterInputGainNode?.disconnect();
+  limiterNode?.disconnect();
+  inputAnalyserNode?.disconnect();
+  compressorAnalyserNode?.disconnect();
+  limiterAnalyserNode?.disconnect();
   widthNodes?.merger.disconnect();
   gainNode?.disconnect();
 }
 
 function connectOutput() {
-  gainNode.connect(audioContext.destination);
   gainNode.connect(analyserNode);
+  analyserNode.connect(audioContext.destination);
 }
 
 function applySolo() {
@@ -119,18 +139,42 @@ function applySolo() {
 }
 
 function connectGraph() {
-  if (!source || !gainNode || !compressorNode || !widthNodes) return;
+  if (
+    !source ||
+    !gainNode ||
+    !compressorNode ||
+    !widthNodes ||
+    !inputAnalyserNode ||
+    !compressorAnalyserNode ||
+    !limiterInputGainNode ||
+    !limiterAnalyserNode ||
+    !limiterNode
+  )
+    return;
 
   disconnectGraph();
-  let processed = source;
+  let processed = source.connect(inputAnalyserNode);
   for (const band of EQ_BANDS) {
     const node = eqNodes[band.id];
     for (const item of node.nodes) processed = processed.connect(item);
   }
   if (applySolo()) processed = processed.connect(soloNode);
-  const lastProcessor = compressorEnabled
-    ? processed.connect(compressorNode)
-    : processed;
+  let lastProcessor = processed;
+  lastProcessor = lastProcessor.connect(compressorAnalyserNode);
+  if (compressorEnabled) {
+    lastProcessor.connect(compressorDryGainNode);
+    lastProcessor = lastProcessor.connect(compressorInputGainNode);
+    lastProcessor = lastProcessor.connect(compressorNode);
+    lastProcessor = lastProcessor.connect(compressorOutputGainNode);
+    lastProcessor = lastProcessor.connect(compressorWetGainNode);
+    compressorDryGainNode.connect(compressorMixNode);
+    lastProcessor.connect(compressorMixNode);
+    lastProcessor = compressorMixNode;
+  }
+
+  lastProcessor = lastProcessor.connect(limiterInputGainNode);
+  lastProcessor = lastProcessor.connect(limiterAnalyserNode);
+  lastProcessor = lastProcessor.connect(limiterNode);
 
   if (width === 1) {
     lastProcessor.connect(gainNode);
@@ -179,10 +223,25 @@ function applyWidth(value) {
 function applyCompressor(settings) {
   compressorEnabled = settings.enabled;
   if (!compressorNode) return;
+  compressorInputGainNode.gain.value = settings.inputGain;
+  compressorOutputGainNode.gain.value = settings.outputGain;
+  compressorDryGainNode.gain.value = 1 - settings.wetMix;
+  compressorWetGainNode.gain.value = settings.wetMix;
   compressorNode.threshold.value = settings.threshold;
+  compressorNode.knee.value = settings.knee;
   compressorNode.ratio.value = settings.ratio;
-  compressorNode.attack.value = settings.attack;
-  compressorNode.release.value = settings.release;
+  compressorNode.attack.value = settings.attack / 1000;
+  compressorNode.release.value = settings.release / 1000;
+}
+
+function applyLimiter(settings) {
+  if (!limiterNode) return;
+  limiterInputGainNode.gain.value = settings.inputGain;
+  limiterNode.threshold.value = settings.threshold;
+  limiterNode.knee.value = 0;
+  limiterNode.ratio.value = 20;
+  limiterNode.attack.value = 0.001;
+  limiterNode.release.value = 0.05;
 }
 
 function setGain(value) {
@@ -211,11 +270,50 @@ function startAnalyser() {
   analyserTimer = globalThis.setInterval(() => {
     if (!analyserNode) return;
     const data = new Uint8Array(analyserNode.frequencyBinCount);
+    const input = new Uint8Array(inputAnalyserNode.fftSize);
+    const comp = new Uint8Array(compressorAnalyserNode.fftSize);
+    const limiter = new Uint8Array(limiterAnalyserNode.fftSize);
+    const output = new Uint8Array(analyserNode.fftSize);
     analyserNode.getByteFrequencyData(data);
+    inputAnalyserNode.getByteTimeDomainData(input);
+    compressorAnalyserNode.getByteTimeDomainData(comp);
+    limiterAnalyserNode.getByteTimeDomainData(limiter);
+    analyserNode.getByteTimeDomainData(output);
+    let inputSum = 0;
+    let compPeak = 0;
+    let limiterPeak = 0;
+    let outputSum = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      const inputSample = (input[i] - 128) / 128;
+      const compSample = Math.abs((comp[i] - 128) / 128);
+      inputSum += inputSample * inputSample;
+      compPeak = Math.max(compPeak, compSample);
+    }
+    for (const value of limiter) {
+      limiterPeak = Math.max(limiterPeak, Math.abs((value - 128) / 128));
+    }
+    for (const value of output) {
+      const outputSample = (value - 128) / 128;
+      outputSum += outputSample * outputSample;
+    }
     chrome.runtime
-      .sendMessage({ type: MSG.ANALYZER_DATA, bins: Array.from(data) })
+      .sendMessage({
+        type: MSG.ANALYZER_DATA,
+        bins: Array.from(data),
+        inputDb: 20 * Math.log10(Math.sqrt(inputSum / input.length) || 0.000001),
+        outputDb: 20 * Math.log10(
+          Math.sqrt(outputSum / output.length) || 0.000001,
+        ),
+        compDb: 20 * Math.log10(compPeak || 0.000001),
+        limiterDb: 20 * Math.log10(limiterPeak || 0.000001),
+        compGrDb: compressorEnabled ? Math.abs(compressorNode.reduction) : 0,
+        limiterGrDb: Math.abs(limiterNode.reduction),
+        grDb:
+          (compressorEnabled ? Math.abs(compressorNode.reduction) : 0) +
+          Math.abs(limiterNode.reduction),
+      })
       .catch(() => {});
-  }, 100);
+  }, 50);
 }
 
 function setCompressor(settings) {
@@ -224,7 +322,13 @@ function setCompressor(settings) {
   return { type: MSG.STATE_UPDATE };
 }
 
-async function startCapture(streamId, gain, initialWidth, eq, compressor) {
+function setLimiter(settings) {
+  applyLimiter(settings);
+  connectGraph();
+  return { type: MSG.STATE_UPDATE };
+}
+
+async function startCapture(streamId, gain, initialWidth, eq, compressor, limiter) {
   await stopCapture();
 
   debug("graph creation");
@@ -237,10 +341,24 @@ async function startCapture(streamId, gain, initialWidth, eq, compressor) {
   );
   soloNode = audioContext.createBiquadFilter();
   analyserNode = audioContext.createAnalyser();
+  inputAnalyserNode = audioContext.createAnalyser();
+  compressorAnalyserNode = audioContext.createAnalyser();
+  limiterAnalyserNode = audioContext.createAnalyser();
   analyserNode.fftSize = 4096;
+  inputAnalyserNode.fftSize = 2048;
+  compressorAnalyserNode.fftSize = 2048;
+  limiterAnalyserNode.fftSize = 2048;
   analyserNode.smoothingTimeConstant = 0.82;
   compressorNode = audioContext.createDynamicsCompressor();
+  compressorInputGainNode = audioContext.createGain();
+  compressorOutputGainNode = audioContext.createGain();
+  compressorDryGainNode = audioContext.createGain();
+  compressorWetGainNode = audioContext.createGain();
+  compressorMixNode = audioContext.createGain();
+  limiterInputGainNode = audioContext.createGain();
+  limiterNode = audioContext.createDynamicsCompressor();
   applyCompressor(compressor ?? DEFAULT_DSP.compressor);
+  applyLimiter(limiter ?? DEFAULT_DSP.limiter);
   widthNodes = createWidthNodes();
   applyWidth(initialWidth ?? DEFAULT_DSP.width);
   gainNode = audioContext.createGain();
@@ -258,11 +376,6 @@ async function startCapture(streamId, gain, initialWidth, eq, compressor) {
     audio: stream.getAudioTracks().length,
     video: stream.getVideoTracks().length,
   });
-  debug(
-    "fullscreen note",
-    "Chrome may limit native video fullscreen while tab capture is active.",
-  );
-
   source = audioContext.createMediaStreamSource(stream);
   connectGraph();
   await audioContext.resume();
@@ -286,6 +399,41 @@ async function stopCapture() {
     compressorNode = null;
   }
 
+  if (compressorInputGainNode) {
+    compressorInputGainNode.disconnect();
+    compressorInputGainNode = null;
+  }
+
+  if (compressorOutputGainNode) {
+    compressorOutputGainNode.disconnect();
+    compressorOutputGainNode = null;
+  }
+
+  if (compressorDryGainNode) {
+    compressorDryGainNode.disconnect();
+    compressorDryGainNode = null;
+  }
+
+  if (compressorWetGainNode) {
+    compressorWetGainNode.disconnect();
+    compressorWetGainNode = null;
+  }
+
+  if (compressorMixNode) {
+    compressorMixNode.disconnect();
+    compressorMixNode = null;
+  }
+
+  if (limiterInputGainNode) {
+    limiterInputGainNode.disconnect();
+    limiterInputGainNode = null;
+  }
+
+  if (limiterNode) {
+    limiterNode.disconnect();
+    limiterNode = null;
+  }
+
   if (soloNode) {
     soloNode.disconnect();
     soloNode = null;
@@ -294,6 +442,21 @@ async function stopCapture() {
   if (analyserNode) {
     analyserNode.disconnect();
     analyserNode = null;
+  }
+
+  if (inputAnalyserNode) {
+    inputAnalyserNode.disconnect();
+    inputAnalyserNode = null;
+  }
+
+  if (compressorAnalyserNode) {
+    compressorAnalyserNode.disconnect();
+    compressorAnalyserNode = null;
+  }
+
+  if (limiterAnalyserNode) {
+    limiterAnalyserNode.disconnect();
+    limiterAnalyserNode = null;
   }
 
   if (gainNode) {
@@ -340,6 +503,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           message.width,
           message.eq,
           message.compressor,
+          message.limiter,
         );
       if (message?.type === MSG.STOP_CAPTURE) return await stopCapture();
       if (message?.type === MSG.SET_GAIN) return setGain(message.gain);
@@ -348,6 +512,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return setEq(message.band, message.patch);
       if (message?.type === MSG.SET_COMPRESSOR)
         return setCompressor(message.compressor);
+      if (message?.type === MSG.SET_LIMITER) return setLimiter(message.limiter);
       return null;
     } catch (error) {
       debug("error", error);

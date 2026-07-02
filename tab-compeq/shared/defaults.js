@@ -23,9 +23,17 @@ export const DEFAULT_DSP = {
   ),
   compressor: {
     enabled: false,
+    inputGain: 1,
+    outputGain: 1,
     threshold: -24,
+    knee: 6,
     ratio: 4,
-    attack: 0.003,
-    release: 0.25,
+    attack: 1,
+    release: 250,
+    wetMix: 1,
+  },
+  limiter: {
+    inputGain: 1,
+    threshold: -1,
   },
 };

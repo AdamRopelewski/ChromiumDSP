@@ -37,7 +37,13 @@
         <section class="eq-column">
           <section class="analyzer-card" aria-label="EQ analyzer">
             <div class="analyzer-grid">
-              <canvas id="eq-canvas" width="560" height="300"></canvas>
+              <canvas id="eq-canvas" width="560" height="260"></canvas>
+              <canvas
+                id="compressor-canvas"
+                width="560"
+                height="260"
+                hidden
+              ></canvas>
               <div class="eq-toolbar">
                 <button id="eq-undo" class="ghost mini" type="button">
                   Undo
@@ -79,6 +85,79 @@
               />
             </label>
           </fieldset>
+
+          <fieldset class="stage-panel" data-panel="comp">
+            <legend>Compressor Stage</legend>
+            <label class="toggle-row">
+              <input id="compressor-enabled" type="checkbox" /> Enabled
+            </label>
+            <label>
+              Threshold: <span id="compressor-threshold-value">-24</span>dB
+              <input
+                id="compressor-threshold"
+                type="range"
+                min="-60"
+                max="0"
+                step="1"
+                value="-24"
+              />
+            </label>
+            <label>
+              Knee: <span id="compressor-knee-value">6</span>dB
+              <input
+                id="compressor-knee"
+                type="range"
+                min="0"
+                max="40"
+                step="1"
+                value="6"
+              />
+            </label>
+            <label>
+              Ratio: <span id="compressor-ratio-value">4.0</span>:1
+              <input
+                id="compressor-ratio"
+                type="range"
+                min="1"
+                max="20"
+                step="0.1"
+                value="4"
+              />
+            </label>
+            <label>
+              Attack: <span id="compressor-attack-value">10</span>ms
+              <input
+                id="compressor-attack"
+                type="range"
+                min="0"
+                max="1"
+                step="0.001"
+                value="0"
+              />
+            </label>
+            <label>
+              Release: <span id="compressor-release-value">250</span>ms
+              <input
+                id="compressor-release"
+                type="range"
+                min="0"
+                max="1"
+                step="0.001"
+                value="0.823"
+              />
+            </label>
+            <label>
+              Wet Mix: <span id="compressor-wet-mix-value">100</span>%
+              <input
+                id="compressor-wet-mix"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="100"
+              />
+            </label>
+          </fieldset>
         </section>
 
         <aside class="side-panel">
@@ -86,23 +165,54 @@
             <div class="meter">
               <span>In</span>
               <div class="meter-track">
-                <div class="meter-fill low-level"></div>
+                <div id="meter-in" class="meter-fill low-level"></div>
               </div>
+              <span id="meter-in-value">-60 dB</span>
             </div>
             <div class="meter">
               <span>Out</span>
               <div class="meter-track">
-                <div class="meter-fill mid-level"></div>
+                <div id="meter-out" class="meter-fill mid-level"></div>
               </div>
+              <span id="meter-out-value">-60 dB</span>
             </div>
             <div class="meter">
               <span>GR</span>
               <div class="meter-track">
-                <div class="meter-fill gr-level"></div>
+                <div id="meter-gr" class="meter-fill gr-level"></div>
               </div>
+              <span id="meter-gr-value">0 dB</span>
             </div>
           </div>
-          <section class="band-panel" aria-label="Selected EQ band">
+          <section id="comp-gain-panel" class="band-panel" hidden>
+            <label>
+              Input: <span id="compressor-input-gain-value">0.0</span>dB
+              <input
+                id="compressor-input-gain"
+                type="range"
+                min="-24"
+                max="24"
+                step="0.1"
+                value="0"
+              />
+            </label>
+            <label>
+              Output: <span id="compressor-output-gain-value">0.0</span>dB
+              <input
+                id="compressor-output-gain"
+                type="range"
+                min="-24"
+                max="24"
+                step="0.1"
+                value="0"
+              />
+            </label>
+          </section>
+          <section
+            id="band-panel"
+            class="band-panel"
+            aria-label="Selected EQ band"
+          >
             <strong id="eq-band-name">Band 3</strong>
             <label>
               Type
@@ -153,45 +263,31 @@
       </section>
 
       <p id="error" class="error" role="alert"></p>
-      <p id="fullscreen-note" class="fullscreen-note" hidden>
-        Chrome may limit native video fullscreen while tab capture is active.
-        Use browser fullscreen/F11 or process audio outside Chrome for normal
-        fullscreen.
-      </p>
-
       <section class="controls-grid">
-        <fieldset class="stage-panel" data-panel="comp">
-          <legend>Compressor Stage</legend>
-          <label class="toggle-row">
-            <input id="compressor-enabled" type="checkbox" /> Enabled
-          </label>
-          <label>
-            Threshold: <span id="compressor-threshold-value">-24</span>dB
-            <input
-              id="compressor-threshold"
-              type="range"
-              min="-60"
-              max="0"
-              step="1"
-              value="-24"
-            />
-          </label>
-          <label>
-            Ratio: <span id="compressor-ratio-value">4.0</span>:1
-            <input
-              id="compressor-ratio"
-              type="range"
-              min="1"
-              max="20"
-              step="0.1"
-              value="4"
-            />
-          </label>
-        </fieldset>
-
         <fieldset class="stage-panel" data-panel="limiter">
           <legend>Limiter Stage</legend>
-          <p class="empty-stage">Limiter controls land in later milestone.</p>
+          <label>
+            Input: <span id="limiter-input-gain-value">0.0</span>dB
+            <input
+              id="limiter-input-gain"
+              type="range"
+              min="-24"
+              max="24"
+              step="0.1"
+              value="0"
+            />
+          </label>
+          <label>
+            Threshold: <span id="limiter-threshold-value">-1</span>dB
+            <input
+              id="limiter-threshold"
+              type="range"
+              min="-24"
+              max="0"
+              step="0.1"
+              value="-1"
+            />
+          </label>
         </fieldset>
       </section>
     </main>

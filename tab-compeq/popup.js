@@ -1,5 +1,13 @@
 import { MSG, TARGET } from "./shared/messages.js";
 import { DEFAULT_DSP, EQ_BANDS } from "./shared/defaults.js";
+import {
+  COMPRESSOR_LIMITS,
+  clamp,
+  dbForLinear,
+  linearForDb,
+  msForNorm,
+  normForMs,
+} from "./audio/compressor.js";
 
 const DEBUG = true;
 const MIN_FREQ = 20;
@@ -12,12 +20,13 @@ const NODE_HIT_RADIUS = 18;
 const hostname = document.querySelector("#hostname");
 const status = document.querySelector("#status");
 const error = document.querySelector("#error");
-const fullscreenNote = document.querySelector("#fullscreen-note");
 const start = document.querySelector("#start");
 const stop = document.querySelector("#stop");
 const reset = document.querySelector("#reset");
 const canvas = document.querySelector("#eq-canvas");
 const ctx = canvas.getContext("2d");
+const compressorCanvas = document.querySelector("#compressor-canvas");
+const compressorCtx = compressorCanvas.getContext("2d");
 const gain = document.querySelector("#gain");
 const gainValue = document.querySelector("#gain-value");
 const width = document.querySelector("#width");
@@ -33,13 +42,49 @@ const eqQValue = document.querySelector("#eq-q-value");
 const eqSolo = document.querySelector("#eq-solo");
 const eqUndo = document.querySelector("#eq-undo");
 const eqRedo = document.querySelector("#eq-redo");
+const bandPanel = document.querySelector("#band-panel");
+const compGainPanel = document.querySelector("#comp-gain-panel");
+const eqToolbar = document.querySelector(".eq-toolbar");
+const freqLabels = document.querySelectorAll(".freq");
 const compressorEnabled = document.querySelector("#compressor-enabled");
+const compressorInputGain = document.querySelector("#compressor-input-gain");
+const compressorInputGainValue = document.querySelector(
+  "#compressor-input-gain-value",
+);
+const compressorOutputGain = document.querySelector("#compressor-output-gain");
+const compressorOutputGainValue = document.querySelector(
+  "#compressor-output-gain-value",
+);
 const compressorThreshold = document.querySelector("#compressor-threshold");
 const compressorThresholdValue = document.querySelector(
   "#compressor-threshold-value",
 );
+const compressorKnee = document.querySelector("#compressor-knee");
+const compressorKneeValue = document.querySelector("#compressor-knee-value");
 const compressorRatio = document.querySelector("#compressor-ratio");
 const compressorRatioValue = document.querySelector("#compressor-ratio-value");
+const compressorAttack = document.querySelector("#compressor-attack");
+const compressorAttackValue = document.querySelector(
+  "#compressor-attack-value",
+);
+const compressorRelease = document.querySelector("#compressor-release");
+const compressorReleaseValue = document.querySelector(
+  "#compressor-release-value",
+);
+const compressorWetMix = document.querySelector("#compressor-wet-mix");
+const compressorWetMixValue = document.querySelector(
+  "#compressor-wet-mix-value",
+);
+const limiterInputGain = document.querySelector("#limiter-input-gain");
+const limiterInputGainValue = document.querySelector("#limiter-input-gain-value");
+const limiterThreshold = document.querySelector("#limiter-threshold");
+const limiterThresholdValue = document.querySelector("#limiter-threshold-value");
+const meterIn = document.querySelector("#meter-in");
+const meterOut = document.querySelector("#meter-out");
+const meterGr = document.querySelector("#meter-gr");
+const meterInValue = document.querySelector("#meter-in-value");
+const meterOutValue = document.querySelector("#meter-out-value");
+const meterGrValue = document.querySelector("#meter-gr-value");
 const stageTabs = document.querySelectorAll(".stage-tab");
 const stagePanels = document.querySelectorAll(".stage-panel");
 
@@ -47,16 +92,18 @@ let currentState = null;
 let selectedBandId = "mid";
 let spectrum = [];
 let dragging = false;
+let draggingCompressor = false;
 let editing = false;
 let undoStack = [];
 let redoStack = [];
+let activeStage = "eq";
+let compressorWaveform = [];
+let compressorGr = [];
+let limiterWaveform = [];
+let limiterGr = [];
 
 function debug(...args) {
   if (DEBUG) console.log("[TabCompEQ]", ...args);
-}
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
 }
 
 function snapshotEq(eq = currentState?.eq) {
@@ -125,16 +172,6 @@ function gainForY(y) {
         10,
     ) / 10
   );
-}
-
-function dbForLinear(value) {
-  if (value <= 0) return -60;
-  return Math.round(clamp(20 * Math.log10(value), -60, 6) * 10) / 10;
-}
-
-function linearForDb(value) {
-  if (value <= -60) return 0;
-  return 10 ** (value / 20);
 }
 
 function commitSlider(input, value) {
@@ -216,7 +253,11 @@ function drawGrid() {
     ctx.font = "11px system-ui";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    ctx.fillText(`${gainDb > 0 ? "+" : ""}${gainDb} dB`, canvas.width - 8, y);
+    ctx.fillText(
+      `${gainDb > 0 ? "+" : ""}${gainDb} dB`,
+      canvas.width - 8,
+      clamp(y, 10, canvas.height - 10),
+    );
   }
   for (const freq of [20, 100, 1000, 10000, 20000]) {
     const x = xForFreq(freq);
@@ -225,6 +266,11 @@ function drawGrid() {
     ctx.lineTo(x, canvas.height);
     ctx.stroke();
   }
+  ctx.fillStyle = "#a1a1aa";
+  ctx.font = "11px system-ui";
+  ctx.textAlign = "left";
+  ctx.fillText("OX Hz", 8, canvas.height - 8);
+  ctx.fillText("OY gain dB", 8, 14);
 }
 
 function drawSpectrum() {
@@ -238,7 +284,11 @@ function drawSpectrum() {
       0,
       spectrum.length - 1,
     );
-    const y = canvas.height - (spectrum[bin] / 255) * canvas.height * 0.75;
+    const y = clamp(
+      canvas.height - (spectrum[bin] / 255) * canvas.height * 0.75 - 18,
+      0,
+      canvas.height,
+    );
     ctx.lineTo(x, y);
   }
   ctx.lineTo(canvas.width, canvas.height);
@@ -296,6 +346,135 @@ function drawEq() {
   drawNodes();
 }
 
+function compressedDb(inputDb, compressor) {
+  const threshold = compressor?.threshold ?? -24;
+  const knee = compressor?.knee ?? 0;
+  const ratio = compressor?.ratio ?? 4;
+  if (knee > 0) {
+    const kneeStart = threshold - knee / 2;
+    const kneeEnd = threshold + knee / 2;
+    if (inputDb > kneeStart && inputDb < kneeEnd) {
+      const over = inputDb - kneeStart;
+      return inputDb + ((1 / ratio - 1) * (over * over)) / (2 * knee);
+    }
+    if (inputDb <= kneeEnd) return inputDb;
+  } else if (inputDb <= threshold) return inputDb;
+  return threshold + (inputDb - threshold) / ratio;
+}
+
+function yForDb(db) {
+  return ((0 - clamp(db, -60, 0)) / 60) * compressorCanvas.height;
+}
+
+function dbForCompressorY(y) {
+  return Math.round(clamp((1 - y / compressorCanvas.height) * 60 - 60, -60, 0));
+}
+
+function drawMeters(data = {}) {
+  const level = (db) => `${clamp(((db ?? -60) + 60) / 60, 0, 1) * 100}%`;
+  meterIn.style.height = level(data.inputDb);
+  meterOut.style.height = level(data.outputDb);
+  meterGr.style.height = `${clamp((data.grDb ?? 0) / 30, 0, 1) * 100}%`;
+  meterInValue.textContent = `${Math.round(data.inputDb ?? -60)} dB`;
+  meterOutValue.textContent = `${Math.round(data.outputDb ?? -60)} dB`;
+  meterGrValue.textContent = `${Math.round(data.grDb ?? 0)} dB`;
+}
+
+function drawCompressor() {
+  const limiter = activeStage === "limiter";
+  const settings = limiter
+    ? (currentState?.limiter ?? DEFAULT_DSP.limiter)
+    : (currentState?.compressor ?? DEFAULT_DSP.compressor);
+  const waveform = limiter ? limiterWaveform : compressorWaveform;
+  const gr = limiter ? limiterGr : compressorGr;
+  compressorCtx.clearRect(
+    0,
+    0,
+    compressorCanvas.width,
+    compressorCanvas.height,
+  );
+  compressorCtx.strokeStyle = "rgba(255,255,255,0.08)";
+  compressorCtx.lineWidth = 1;
+  for (const db of [-60, -48, -36, -24, -12, 0]) {
+    const y = yForDb(db);
+    const x = ((db + 60) / 60) * compressorCanvas.width;
+    compressorCtx.beginPath();
+    compressorCtx.moveTo(0, y);
+    compressorCtx.lineTo(compressorCanvas.width, y);
+    compressorCtx.moveTo(x, 0);
+    compressorCtx.lineTo(x, compressorCanvas.height);
+    compressorCtx.stroke();
+  }
+
+  compressorCtx.beginPath();
+  for (let x = 0; x <= compressorCanvas.width; x += 2) {
+    const inputDb = (x / compressorCanvas.width) * 60 - 60;
+    const outputDb = limiter
+      ? compressedDb(inputDb, { threshold: settings.threshold, knee: 0, ratio: 20 })
+      : compressedDb(inputDb, settings);
+    const y = yForDb(outputDb);
+    if (x === 0) compressorCtx.moveTo(x, y);
+    else compressorCtx.lineTo(x, y);
+  }
+  compressorCtx.strokeStyle = limiter || settings.enabled ? "#38bdf8" : "#52525b";
+  compressorCtx.lineWidth = 3;
+  compressorCtx.stroke();
+
+  compressorCtx.beginPath();
+  for (let i = 0; i < waveform.length; i += 1) {
+    const x =
+      (i / Math.max(1, waveform.length - 1)) *
+      compressorCanvas.width;
+    const y = yForDb(waveform[i]);
+    if (i === 0) compressorCtx.moveTo(x, y);
+    else compressorCtx.lineTo(x, y);
+  }
+  compressorCtx.strokeStyle = "rgba(244,244,245,0.72)";
+  compressorCtx.lineWidth = 2;
+  compressorCtx.stroke();
+
+  compressorCtx.beginPath();
+  const thresholdY = yForDb(settings.threshold);
+  compressorCtx.moveTo(0, thresholdY);
+  compressorCtx.lineTo(compressorCanvas.width, thresholdY);
+  compressorCtx.strokeStyle = "#f59e0b";
+  compressorCtx.lineWidth = 2;
+  compressorCtx.stroke();
+
+  compressorCtx.beginPath();
+  for (let i = 0; i < gr.length; i += 1) {
+    const x = (i / Math.max(1, gr.length - 1)) * compressorCanvas.width;
+    const y = (clamp(gr[i], 0, 30) / 30) * compressorCanvas.height;
+    if (i === 0) compressorCtx.moveTo(x, y);
+    else compressorCtx.lineTo(x, y);
+  }
+  compressorCtx.strokeStyle = "#f87171";
+  compressorCtx.lineWidth = 2;
+  compressorCtx.stroke();
+
+  compressorCtx.fillStyle = "#d4d4d8";
+  compressorCtx.font = "11px system-ui";
+  compressorCtx.textAlign = "left";
+  compressorCtx.textBaseline = "middle";
+  for (const db of [-60, -48, -36, -24, -12, 0]) {
+    compressorCtx.fillText(
+      `${db} dB`,
+      6,
+      clamp(yForDb(db), 10, compressorCanvas.height - 10),
+    );
+  }
+}
+
+function showStage(stage) {
+  activeStage = stage;
+  canvas.hidden = activeStage !== "eq";
+  compressorCanvas.hidden = !["comp", "limiter"].includes(activeStage);
+  bandPanel.hidden = activeStage !== "eq";
+  compGainPanel.hidden = activeStage !== "comp";
+  eqToolbar.hidden = activeStage !== "eq";
+  for (const label of freqLabels) label.hidden = activeStage !== "eq";
+}
+
 function selectedBand() {
   return currentState?.eq?.[selectedBandId];
 }
@@ -323,6 +502,7 @@ function render(state) {
 
   hostname.textContent = state?.hostname || "-";
   status.textContent = state?.status || "inactive";
+  status.classList.toggle("capturing", state?.active === true);
   error.textContent = state?.error || "";
   gain.value = dbForLinear(state?.gain ?? 1);
   gainValue.textContent = Number(gain.value).toFixed(1);
@@ -330,14 +510,58 @@ function render(state) {
   widthValue.textContent = Number(width.value).toFixed(2);
   renderSelectedBand();
   drawEq();
+  drawCompressor();
   compressorEnabled.checked = state?.compressor?.enabled ?? false;
+  compressorInputGain.value = dbForLinear(
+    state?.compressor?.inputGain ?? 1,
+    -24,
+    24,
+  );
+  compressorInputGainValue.textContent = Number(
+    compressorInputGain.value,
+  ).toFixed(1);
+  compressorOutputGain.value = dbForLinear(
+    state?.compressor?.outputGain ?? 1,
+    -24,
+    24,
+  );
+  compressorOutputGainValue.textContent = Number(
+    compressorOutputGain.value,
+  ).toFixed(1);
   compressorThreshold.value = state?.compressor?.threshold ?? -24;
   compressorThresholdValue.textContent = compressorThreshold.value;
+  compressorKnee.value = state?.compressor?.knee ?? 6;
+  compressorKneeValue.textContent = compressorKnee.value;
   compressorRatio.value = state?.compressor?.ratio ?? 4;
   compressorRatioValue.textContent = Number(compressorRatio.value).toFixed(1);
+  compressorAttack.value = normForMs(
+    state?.compressor?.attack ?? DEFAULT_DSP.compressor.attack,
+    ...COMPRESSOR_LIMITS.attack,
+  );
+  compressorAttackValue.textContent = String(
+    state?.compressor?.attack ?? DEFAULT_DSP.compressor.attack,
+  );
+  compressorRelease.value = normForMs(
+    state?.compressor?.release ?? 250,
+    ...COMPRESSOR_LIMITS.release,
+  );
+  compressorReleaseValue.textContent = String(
+    state?.compressor?.release ?? 250,
+  );
+  compressorWetMix.value = Math.round(
+    (state?.compressor?.wetMix ?? DEFAULT_DSP.compressor.wetMix) * 100,
+  );
+  compressorWetMixValue.textContent = compressorWetMix.value;
+  limiterInputGain.value = dbForLinear(
+    state?.limiter?.inputGain ?? DEFAULT_DSP.limiter.inputGain,
+    -24,
+    24,
+  );
+  limiterInputGainValue.textContent = Number(limiterInputGain.value).toFixed(1);
+  limiterThreshold.value = state?.limiter?.threshold ?? DEFAULT_DSP.limiter.threshold;
+  limiterThresholdValue.textContent = limiterThreshold.value;
   start.disabled = state?.active === true;
   stop.disabled = state?.active !== true;
-  fullscreenNote.hidden = state?.active !== true;
   reset.hidden = !state?.error?.includes("active capture stream");
 }
 
@@ -421,16 +645,58 @@ async function setWidth() {
 async function setCompressor() {
   const compressor = {
     enabled: compressorEnabled.checked,
+    inputGain: linearForDb(Number(compressorInputGain.value)),
+    outputGain: linearForDb(Number(compressorOutputGain.value)),
     threshold: Number(compressorThreshold.value),
+    knee: Number(compressorKnee.value),
     ratio: Number(compressorRatio.value),
+    attack: msForNorm(
+      Number(compressorAttack.value),
+      ...COMPRESSOR_LIMITS.attack,
+    ),
+    release: msForNorm(
+      Number(compressorRelease.value),
+      ...COMPRESSOR_LIMITS.release,
+    ),
+    wetMix: Number(compressorWetMix.value) / 100,
   };
+  compressorInputGainValue.textContent = Number(
+    compressorInputGain.value,
+  ).toFixed(1);
+  compressorOutputGainValue.textContent = Number(
+    compressorOutputGain.value,
+  ).toFixed(1);
   compressorThresholdValue.textContent = String(compressor.threshold);
+  compressorKneeValue.textContent = String(compressor.knee);
   compressorRatioValue.textContent = compressor.ratio.toFixed(1);
+  compressorAttackValue.textContent = String(compressor.attack);
+  compressorReleaseValue.textContent = String(compressor.release);
+  compressorWetMixValue.textContent = String(Math.round(compressor.wetMix * 100));
+  currentState = { ...(currentState ?? {}), compressor };
+  drawCompressor();
   debug("popup compressor", compressor);
   const response = await chrome.runtime.sendMessage({
     type: MSG.SET_COMPRESSOR,
     target: TARGET.BACKGROUND,
     compressor,
+  });
+  if (response?.error) render(response);
+}
+
+async function setLimiter() {
+  const limiter = {
+    inputGain: linearForDb(Number(limiterInputGain.value)),
+    threshold: Number(limiterThreshold.value),
+  };
+  limiterInputGainValue.textContent = Number(limiterInputGain.value).toFixed(1);
+  limiterThresholdValue.textContent = String(limiter.threshold);
+  currentState = { ...(currentState ?? {}), limiter };
+  drawCompressor();
+  debug("popup limiter", limiter);
+  const response = await chrome.runtime.sendMessage({
+    type: MSG.SET_LIMITER,
+    target: TARGET.BACKGROUND,
+    limiter,
   });
   if (response?.error) render(response);
 }
@@ -547,8 +813,53 @@ canvas.addEventListener("dblclick", (event) => {
   if (picked.distance <= NODE_HIT_RADIUS) resetBand(picked.id);
 });
 compressorEnabled.addEventListener("change", () => setCompressor());
+compressorInputGain.addEventListener("input", () => setCompressor());
+compressorOutputGain.addEventListener("input", () => setCompressor());
 compressorThreshold.addEventListener("input", () => setCompressor());
+compressorKnee.addEventListener("input", () => setCompressor());
 compressorRatio.addEventListener("input", () => setCompressor());
+compressorAttack.addEventListener("input", () => setCompressor());
+compressorRelease.addEventListener("input", () => setCompressor());
+compressorWetMix.addEventListener("input", () => setCompressor());
+limiterInputGain.addEventListener("input", () => setLimiter());
+limiterThreshold.addEventListener("input", () => setLimiter());
+compressorCanvas.addEventListener("pointerdown", (event) => {
+  draggingCompressor = true;
+  compressorCanvas.setPointerCapture(event.pointerId);
+  const threshold = dbForCompressorY(
+    ((event.clientY - compressorCanvas.getBoundingClientRect().top) /
+      compressorCanvas.getBoundingClientRect().height) *
+      compressorCanvas.height,
+  );
+  if (activeStage === "limiter") {
+    limiterThreshold.value = clamp(threshold, -24, 0);
+    setLimiter();
+  } else {
+    compressorThreshold.value = threshold;
+    setCompressor();
+  }
+});
+compressorCanvas.addEventListener("pointermove", (event) => {
+  if (!draggingCompressor) return;
+  const threshold = dbForCompressorY(
+    ((event.clientY - compressorCanvas.getBoundingClientRect().top) /
+      compressorCanvas.getBoundingClientRect().height) *
+      compressorCanvas.height,
+  );
+  if (activeStage === "limiter") {
+    limiterThreshold.value = clamp(threshold, -24, 0);
+    setLimiter();
+  } else {
+    compressorThreshold.value = threshold;
+    setCompressor();
+  }
+});
+compressorCanvas.addEventListener("pointerup", () => {
+  draggingCompressor = false;
+});
+compressorCanvas.addEventListener("pointercancel", () => {
+  draggingCompressor = false;
+});
 for (const input of document.querySelectorAll('input[type="range"]')) {
   input.addEventListener("wheel", (event) => {
     event.preventDefault();
@@ -559,12 +870,16 @@ for (const input of document.querySelectorAll('input[type="range"]')) {
     );
   });
   input.addEventListener("dblclick", () => {
-    const value =
-      input === eqFreq
-        ? normForFreq(DEFAULT_DSP.eq[selectedBandId].freq)
-        : input === eqQ
-          ? normForQ(DEFAULT_DSP.eq[selectedBandId].q)
-          : Number(input.defaultValue);
+    let value = Number(input.defaultValue);
+    if (input === eqFreq) value = normForFreq(DEFAULT_DSP.eq[selectedBandId].freq);
+    if (input === eqQ) value = normForQ(DEFAULT_DSP.eq[selectedBandId].q);
+    if (input === compressorAttack)
+      value = normForMs(DEFAULT_DSP.compressor.attack, ...COMPRESSOR_LIMITS.attack);
+    if (input === compressorRelease)
+      value = normForMs(
+        DEFAULT_DSP.compressor.release,
+        ...COMPRESSOR_LIMITS.release,
+      );
     commitSlider(input, value);
   });
 }
@@ -577,15 +892,38 @@ for (const tab of stageTabs) {
         panel.dataset.panel === tab.dataset.stage,
       );
     }
+    showStage(tab.dataset.stage);
+    drawEq();
+    drawCompressor();
   });
 }
+
+showStage(activeStage);
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === MSG.STATE_UPDATE && message.state)
     render(message.state);
   if (message?.type === MSG.ANALYZER_DATA) {
     spectrum = message.bins;
-    drawEq();
+    if (Number.isFinite(message.compDb)) {
+      compressorWaveform.push(message.compDb);
+      compressorWaveform = compressorWaveform.slice(-40);
+    }
+    if (Number.isFinite(message.grDb)) {
+      compressorGr.push(message.compGrDb ?? message.grDb);
+      compressorGr = compressorGr.slice(-40);
+    }
+    if (Number.isFinite(message.limiterDb)) {
+      limiterWaveform.push(message.limiterDb);
+      limiterWaveform = limiterWaveform.slice(-40);
+    }
+    if (Number.isFinite(message.limiterGrDb)) {
+      limiterGr.push(message.limiterGrDb);
+      limiterGr = limiterGr.slice(-40);
+    }
+    drawMeters(message);
+    if (activeStage === "eq") drawEq();
+    if (["comp", "limiter"].includes(activeStage)) drawCompressor();
   }
 });
 

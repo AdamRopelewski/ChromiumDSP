@@ -1,5 +1,6 @@
 import { MSG, TARGET } from "./shared/messages.js";
 import { DEFAULT_DSP, EQ_BANDS } from "./shared/defaults.js";
+import { normalizeCompressor, validateCompressor } from "./audio/compressor.js";
 
 const DEBUG = true;
 const OFFSCREEN_URL = "offscreen.html";
@@ -13,6 +14,7 @@ let state = {
   width: DEFAULT_DSP.width,
   eq: { ...DEFAULT_DSP.eq },
   compressor: { ...DEFAULT_DSP.compressor },
+  limiter: { ...DEFAULT_DSP.limiter },
   status: "inactive",
   error: null,
 };
@@ -35,6 +37,10 @@ function setState(patch, notify = true) {
 async function loadSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEY);
   const storedEq = stored[STORAGE_KEY]?.eq ?? {};
+  const storedCompressor = normalizeCompressor({
+    ...DEFAULT_DSP.compressor,
+    ...(stored[STORAGE_KEY]?.compressor ?? {}),
+  });
   state = {
     ...state,
     ...DEFAULT_DSP,
@@ -45,10 +51,8 @@ async function loadSettings() {
         { ...DEFAULT_DSP.eq[band.id], ...storedEq[band.id] },
       ]),
     ),
-    compressor: {
-      ...DEFAULT_DSP.compressor,
-      ...stored[STORAGE_KEY]?.compressor,
-    },
+    compressor: { ...storedCompressor, enabled: false },
+    limiter: { ...DEFAULT_DSP.limiter, ...(stored[STORAGE_KEY]?.limiter ?? {}) },
   };
 }
 
@@ -59,8 +63,16 @@ async function saveSettings() {
       width: state.width,
       eq: state.eq,
       compressor: state.compressor,
+      limiter: state.limiter,
     },
   });
+}
+
+function validateLimiter(limiter) {
+  if (!Number.isFinite(limiter.inputGain) || limiter.inputGain < 0 || limiter.inputGain > 16)
+    throw new Error("Limiter input gain must be between -24 and 24 dB.");
+  if (!Number.isFinite(limiter.threshold) || limiter.threshold < -24 || limiter.threshold > 0)
+    throw new Error("Limiter threshold must be between -24 and 0 dB.");
 }
 
 function getHostname(url) {
@@ -144,6 +156,7 @@ async function startCapture() {
     width: state.width,
     eq: state.eq,
     compressor: state.compressor,
+    limiter: state.limiter,
     tab: { id: tab.id, hostname: getHostname(tab.url) },
   });
 
@@ -179,21 +192,8 @@ async function resetCapture(notify = true) {
 }
 
 async function setCompressor(patch) {
-  const compressor = { ...state.compressor, ...patch };
-  if (typeof compressor.enabled !== "boolean")
-    throw new Error("Compressor enabled must be boolean.");
-  if (
-    !Number.isFinite(compressor.threshold) ||
-    compressor.threshold < -60 ||
-    compressor.threshold > 0
-  )
-    throw new Error("Compressor threshold must be between -60 and 0 dB.");
-  if (
-    !Number.isFinite(compressor.ratio) ||
-    compressor.ratio < 1 ||
-    compressor.ratio > 20
-  )
-    throw new Error("Compressor ratio must be between 1 and 20.");
+  const compressor = normalizeCompressor({ ...state.compressor, ...patch });
+  validateCompressor(compressor);
 
   setState({ compressor, error: null }, false);
   await saveSettings();
@@ -202,6 +202,24 @@ async function setCompressor(patch) {
     const response = await sendToOffscreen({
       type: MSG.SET_COMPRESSOR,
       compressor,
+    });
+    if (response?.type === MSG.ERROR) throw new Error(response.error);
+  }
+
+  return state;
+}
+
+async function setLimiter(patch) {
+  const limiter = { ...state.limiter, ...patch };
+  validateLimiter(limiter);
+
+  setState({ limiter, error: null }, false);
+  await saveSettings();
+
+  if (state.active) {
+    const response = await sendToOffscreen({
+      type: MSG.SET_LIMITER,
+      limiter,
     });
     if (response?.type === MSG.ERROR) throw new Error(response.error);
   }
@@ -330,6 +348,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return await setEq(message.band, message.patch);
       if (message?.type === MSG.SET_COMPRESSOR)
         return await setCompressor(message.compressor);
+      if (message?.type === MSG.SET_LIMITER)
+        return await setLimiter(message.limiter);
       if (message?.type === MSG.GET_STATE) return state;
       throw new Error(`Unknown message: ${message?.type}`);
     } catch (error) {
