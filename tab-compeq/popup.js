@@ -24,6 +24,9 @@ const error = document.querySelector("#error");
 const start = document.querySelector("#start");
 const stop = document.querySelector("#stop");
 const reset = document.querySelector("#reset");
+const presetSelect = document.querySelector("#preset-select");
+const presetSave = document.querySelector("#preset-save");
+const presetDelete = document.querySelector("#preset-delete");
 const canvas = document.querySelector("#eq-canvas");
 const ctx = canvas.getContext("2d");
 const compressorCanvas = document.querySelector("#compressor-canvas");
@@ -44,6 +47,7 @@ const eqQValue = document.querySelector("#eq-q-value");
 const eqSolo = document.querySelector("#eq-solo");
 const eqUndo = document.querySelector("#eq-undo");
 const eqRedo = document.querySelector("#eq-redo");
+const moduleReset = document.querySelector("#module-reset");
 const bandPanel = document.querySelector("#band-panel");
 const compGainPanel = document.querySelector("#comp-gain-panel");
 const eqToolbar = document.querySelector(".eq-toolbar");
@@ -157,6 +161,18 @@ function qForNorm(value) {
   const min = Math.log10(MIN_Q);
   const max = Math.log10(MAX_Q);
   return Math.round(10 ** (min + clamp(value, 0, 1) * (max - min)) * 100) / 100;
+}
+
+function formatMs(value, limits) {
+  const next = clamp(value, ...limits);
+  return next < 1 ? next.toFixed(1) : String(next);
+}
+
+function presetOption(name, value = name) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = name;
+  return option;
 }
 
 function freqForX(x) {
@@ -466,23 +482,15 @@ function drawCompressor() {
 
   compressorCtx.fillStyle = "#d4d4d8";
   compressorCtx.font = "11px system-ui";
-  compressorCtx.textAlign = "left";
+  compressorCtx.textAlign = "right";
   compressorCtx.textBaseline = "middle";
   for (const db of [-60, -48, -36, -24, -12, 0]) {
     compressorCtx.fillText(
       `${db} dB`,
-      6,
+      compressorCanvas.width - 8,
       clamp(yForDb(db), 10, compressorCanvas.height - 10),
     );
   }
-  compressorCtx.textBaseline = "top";
-  compressorCtx.fillText(
-    limiter
-      ? "Limiter analyzer"
-      : `Compressor analyzer: ${currentState?.compressor?.mode ?? "stereo"}`,
-    6,
-    6,
-  );
 }
 
 function showStage(stage) {
@@ -491,7 +499,10 @@ function showStage(stage) {
   compressorCanvas.hidden = !["comp", "limiter"].includes(activeStage);
   bandPanel.hidden = activeStage !== "eq";
   compGainPanel.hidden = activeStage !== "comp";
-  eqToolbar.hidden = activeStage !== "eq";
+  eqToolbar.hidden = false;
+  eqUndo.hidden = activeStage !== "eq";
+  eqRedo.hidden = activeStage !== "eq";
+  moduleReset.textContent = `Reset ${stage === "comp" ? "Comp" : stage === "eq" ? "EQ" : "Limiter"}`;
   for (const label of freqLabels) label.hidden = activeStage !== "eq";
 }
 
@@ -565,15 +576,17 @@ function render(state) {
     state?.compressor?.attack ?? DEFAULT_DSP.compressor.attack,
     ...COMPRESSOR_LIMITS.attack,
   );
-  compressorAttackValue.textContent = String(
+  compressorAttackValue.textContent = formatMs(
     state?.compressor?.attack ?? DEFAULT_DSP.compressor.attack,
+    COMPRESSOR_LIMITS.attack,
   );
   compressorRelease.value = normForMs(
     state?.compressor?.release ?? 250,
     ...COMPRESSOR_LIMITS.release,
   );
-  compressorReleaseValue.textContent = String(
+  compressorReleaseValue.textContent = formatMs(
     state?.compressor?.release ?? 250,
+    COMPRESSOR_LIMITS.release,
   );
   compressorWetMix.value = Math.round(
     (state?.compressor?.wetMix ?? DEFAULT_DSP.compressor.wetMix) * 100,
@@ -594,6 +607,13 @@ function render(state) {
     state?.active === true ? "Stop capture" : "Start capture",
   );
   reset.hidden = !state?.error?.includes("active capture stream");
+  const presetNames = Object.keys(state?.presets ?? {}).sort();
+  presetSelect.replaceChildren(
+    presetOption("No preset", ""),
+    ...presetNames.map((name) => presetOption(name)),
+  );
+  presetSelect.value = state?.presetName ?? "";
+  presetDelete.disabled = presetSelect.value === "";
   drawEq();
   drawCompressor();
 }
@@ -603,6 +623,15 @@ async function send(type) {
   const response = await chrome.runtime.sendMessage({
     type,
     target: TARGET.BACKGROUND,
+  });
+  render(response);
+}
+
+async function sendPreset(type, name) {
+  const response = await chrome.runtime.sendMessage({
+    type,
+    target: TARGET.BACKGROUND,
+    name,
   });
   render(response);
 }
@@ -717,8 +746,14 @@ async function setCompressor() {
   compressorThresholdValue.textContent = String(compressor.threshold);
   compressorKneeValue.textContent = String(compressor.knee);
   compressorRatioValue.textContent = compressor.ratio.toFixed(1);
-  compressorAttackValue.textContent = String(compressor.attack);
-  compressorReleaseValue.textContent = String(compressor.release);
+  compressorAttackValue.textContent = formatMs(
+    compressor.attack,
+    COMPRESSOR_LIMITS.attack,
+  );
+  compressorReleaseValue.textContent = formatMs(
+    compressor.release,
+    COMPRESSOR_LIMITS.release,
+  );
   compressorWetMixValue.textContent = String(Math.round(compressor.wetMix * 100));
   currentState = { ...(currentState ?? {}), compressor };
   chainCompStage.textContent = `Comp ${compressor.enabled ? "ON" : "OFF"}`;
@@ -750,6 +785,36 @@ async function setLimiter() {
     limiter,
   });
   if (response?.error) render(response);
+}
+
+function resetEq() {
+  undoStack.push(snapshotEq());
+  redoStack = [];
+  sendEqState(snapshotEq(DEFAULT_DSP.eq));
+}
+
+function resetCompressor() {
+  currentState = {
+    ...(currentState ?? {}),
+    compressor: { ...DEFAULT_DSP.compressor },
+  };
+  render(currentState);
+  setCompressor();
+}
+
+function resetLimiter() {
+  currentState = {
+    ...(currentState ?? {}),
+    limiter: { ...DEFAULT_DSP.limiter },
+  };
+  render(currentState);
+  setLimiter();
+}
+
+function resetActiveModule() {
+  if (activeStage === "eq") resetEq();
+  if (activeStage === "comp") resetCompressor();
+  if (activeStage === "limiter") resetLimiter();
 }
 
 function canvasPoint(event) {
@@ -786,6 +851,19 @@ function dragBand(event) {
   });
 }
 
+function wheelBandQ(event) {
+  if (!currentState) return;
+  const picked = pickBand(canvasPoint(event));
+  if (picked.distance > NODE_HIT_RADIUS) return;
+  event.preventDefault();
+  selectedBandId = picked.id;
+  beginEqEdit();
+  sendEqPatch(picked.id, {
+    q: qForNorm(normForQ(currentState.eq[picked.id].q) + (event.deltaY < 0 ? 0.015 : -0.015)),
+  });
+  endEqEdit();
+}
+
 function resetBand(bandId) {
   selectedBandId = bandId;
   beginEqEdit();
@@ -799,6 +877,16 @@ brandButton.addEventListener("click", () =>
   send(currentState?.active === true ? MSG.STOP_CAPTURE : MSG.START_CAPTURE),
 );
 reset.addEventListener("click", () => send(MSG.RESET_CAPTURE));
+presetSelect.addEventListener("change", () => {
+  if (presetSelect.value) sendPreset(MSG.APPLY_PRESET, presetSelect.value);
+});
+presetSave.addEventListener("click", () => {
+  const name = globalThis.prompt("Preset name", presetSelect.value || "");
+  if (name !== null) sendPreset(MSG.SAVE_PRESET, name);
+});
+presetDelete.addEventListener("click", () => {
+  if (presetSelect.value) sendPreset(MSG.DELETE_PRESET, presetSelect.value);
+});
 gain.addEventListener("input", () => setGain());
 width.addEventListener("input", () => setWidth());
 eqEnabled.addEventListener("change", () => setEqEnabled());
@@ -812,6 +900,7 @@ eqRedo.addEventListener("click", () => {
   undoStack.push(snapshotEq());
   sendEqState(redoStack.pop());
 });
+moduleReset.addEventListener("click", () => resetActiveModule());
 for (const input of [eqFreq, eqGain, eqQ]) {
   input.addEventListener("pointerdown", () => beginEqEdit());
   input.addEventListener("pointerup", () => endEqEdit());
@@ -872,6 +961,7 @@ canvas.addEventListener("dblclick", (event) => {
   const picked = pickBand(canvasPoint(event));
   if (picked.distance <= NODE_HIT_RADIUS) resetBand(picked.id);
 });
+canvas.addEventListener("wheel", (event) => wheelBandQ(event), { passive: false });
 compressorEnabled.addEventListener("change", () => setCompressor());
 compressorMode.addEventListener("change", () => setCompressor());
 compressorInputGain.addEventListener("input", () => setCompressor());
@@ -922,14 +1012,18 @@ compressorCanvas.addEventListener("pointercancel", () => {
   draggingCompressor = false;
 });
 for (const input of document.querySelectorAll('input[type="range"]')) {
-  input.addEventListener("wheel", (event) => {
-    event.preventDefault();
-    const step = Number(input.step) || 1;
-    commitSlider(
-      input,
-      Number(input.value) + (event.deltaY < 0 ? step : -step),
-    );
-  });
+  input.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      const step = Number(input.step) || 1;
+      commitSlider(
+        input,
+        Number(input.value) + (event.deltaY < 0 ? step : -step),
+      );
+    },
+    { passive: false },
+  );
   input.addEventListener("dblclick", () => {
     let value = Number(input.defaultValue);
     if (input === eqFreq) value = normForFreq(DEFAULT_DSP.eq[selectedBandId].freq);

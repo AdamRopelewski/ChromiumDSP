@@ -9,6 +9,12 @@ import {
 const DEBUG = false;
 const OFFSCREEN_URL = "offscreen.html";
 const STORAGE_KEY = "dsp";
+const ICONS = {
+  "16": "assets/icon-16.png",
+  "32": "assets/icon-32.png",
+  "48": "assets/icon-48.png",
+  "128": "assets/icon-128.png",
+};
 
 let state = {
   active: false,
@@ -20,6 +26,8 @@ let state = {
   eq: { ...DEFAULT_DSP.eq },
   compressor: { ...DEFAULT_DSP.compressor },
   limiter: { ...DEFAULT_DSP.limiter },
+  presets: {},
+  presetName: "",
   status: "inactive",
   error: null,
 };
@@ -36,7 +44,23 @@ function sendState() {
 
 function setState(patch, notify = true) {
   state = { ...state, ...patch };
+  chrome.action.setBadgeText({ text: state.active ? "ON" : "" })?.catch?.(() => {});
+  chrome.action.setBadgeBackgroundColor({ color: "#22c55e" })?.catch?.(() => {});
+  chrome.action
+    .setIcon({ path: state.active ? "assets/icon-active.svg" : ICONS })
+    ?.catch?.(() => {});
   if (notify) sendState();
+}
+
+function dspSettings(source = state) {
+  return {
+    gain: source.gain,
+    width: source.width,
+    eqEnabled: source.eqEnabled,
+    eq: source.eq,
+    compressor: source.compressor,
+    limiter: source.limiter,
+  };
 }
 
 async function loadSettings() {
@@ -58,18 +82,15 @@ async function loadSettings() {
     ),
     compressor: { ...storedCompressor, enabled: false },
     limiter: { ...DEFAULT_DSP.limiter, ...(stored[STORAGE_KEY]?.limiter ?? {}) },
+    presets: stored[STORAGE_KEY]?.presets ?? {},
   };
 }
 
 async function saveSettings() {
   await chrome.storage.local.set({
     [STORAGE_KEY]: {
-      gain: state.gain,
-      width: state.width,
-      eqEnabled: state.eqEnabled,
-      eq: state.eq,
-      compressor: state.compressor,
-      limiter: state.limiter,
+      ...dspSettings(),
+      presets: state.presets,
     },
   });
 }
@@ -92,9 +113,67 @@ function getHostname(url) {
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error("No active tab.");
-  if (!tab.url || !/^https?:/.test(tab.url))
+  if (!tab.url || !/^(https?|file):/.test(tab.url))
     throw new Error("Unsupported tab URL.");
   return tab;
+}
+
+async function applyDsp(settings) {
+  setState({ ...settings, error: null }, false);
+  await saveSettings();
+
+  if (state.active) {
+    for (const message of [
+      { type: MSG.SET_GAIN, gain: state.gain },
+      { type: MSG.SET_WIDTH, width: state.width },
+      { type: MSG.SET_EQ_ENABLED, eqEnabled: state.eqEnabled },
+      { type: MSG.SET_COMPRESSOR, compressor: state.compressor },
+      { type: MSG.SET_LIMITER, limiter: state.limiter },
+    ]) {
+      const response = await sendToOffscreen(message);
+      if (response?.type === MSG.ERROR) throw new Error(response.error);
+    }
+    for (const band of EQ_BANDS) {
+      const response = await sendToOffscreen({
+        type: MSG.SET_EQ,
+        band: band.id,
+        patch: state.eq[band.id],
+      });
+      if (response?.type === MSG.ERROR) throw new Error(response.error);
+    }
+  }
+
+  return state;
+}
+
+async function savePreset(name) {
+  const presetName = name.trim();
+  if (!presetName) throw new Error("Preset name is required.");
+  setState(
+    {
+      presets: { ...state.presets, [presetName]: dspSettings() },
+      presetName,
+      error: null,
+    },
+    false,
+  );
+  await saveSettings();
+  return state;
+}
+
+async function applyPreset(name) {
+  const preset = state.presets[name];
+  if (!preset) throw new Error(`Unknown preset: ${name}`);
+  state.presetName = name;
+  return applyDsp(preset);
+}
+
+async function deletePreset(name) {
+  const presets = { ...state.presets };
+  delete presets[name];
+  setState({ presets, presetName: "", error: null }, false);
+  await saveSettings();
+  return state;
 }
 
 async function ensureOffscreenDocument() {
@@ -376,6 +455,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return await setCompressor(message.compressor);
       if (message?.type === MSG.SET_LIMITER)
         return await setLimiter(message.limiter);
+      if (message?.type === MSG.SAVE_PRESET)
+        return await savePreset(message.name ?? "");
+      if (message?.type === MSG.APPLY_PRESET)
+        return await applyPreset(message.name ?? "");
+      if (message?.type === MSG.DELETE_PRESET)
+        return await deletePreset(message.name ?? "");
       if (message?.type === MSG.GET_STATE) return state;
       throw new Error(`Unknown message: ${message?.type}`);
     } catch (error) {

@@ -4,8 +4,8 @@ export const COMPRESSOR_LIMITS = {
   threshold: [-60, 0],
   knee: [0, 40],
   ratio: [1, 20],
-  attack: [1, 100],
-  release: [10, 500],
+  attack: [0.1, 20],
+  release: [10, 1000],
   wetMix: [0, 1],
 };
 
@@ -34,7 +34,7 @@ export function normForMs(value, minMs, maxMs) {
 export function msForNorm(value, minMs, maxMs) {
   const min = Math.log10(minMs);
   const max = Math.log10(maxMs);
-  return Math.round(10 ** (min + clamp(value, 0, 1) * (max - min)));
+  return Math.round(10 ** (min + clamp(value, 0, 1) * (max - min)) * 10) / 10;
 }
 
 export function normalizeCompressor(compressor) {
@@ -42,7 +42,8 @@ export function normalizeCompressor(compressor) {
   if (!Number.isFinite(next.wetMix) && Number.isFinite(next.dryMix))
     next.wetMix = 1 - next.dryMix;
   delete next.dryMix;
-  if (next.attack > 0 && next.attack < 1) next.attack *= 1000;
+  if (next.attack > 0 && next.attack < COMPRESSOR_LIMITS.attack[0])
+    next.attack *= 1000;
   if (next.release > 0 && next.release < 10) next.release *= 1000;
   next.attack = clamp(next.attack, ...COMPRESSOR_LIMITS.attack);
   next.release = clamp(next.release, ...COMPRESSOR_LIMITS.release);
@@ -81,12 +82,12 @@ export function validateCompressor(compressor) {
     [
       compressor.attack,
       ...COMPRESSOR_LIMITS.attack,
-      "attack must be between 1 and 100 ms",
+      "attack must be between 0.1 and 20 ms",
     ],
     [
       compressor.release,
       ...COMPRESSOR_LIMITS.release,
-      "release must be between 10 and 500 ms",
+      "release must be between 10 and 1000 ms",
     ],
     [
       compressor.wetMix,

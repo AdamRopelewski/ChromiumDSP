@@ -24,6 +24,17 @@
         </div>
       </header>
 
+      <section class="preset-bar" aria-label="Presets">
+        <label>
+          Preset
+          <select id="preset-select">
+            <option value="">No preset</option>
+          </select>
+        </label>
+        <button id="preset-save" type="button">Save</button>
+        <button id="preset-delete" class="ghost" type="button">Delete</button>
+      </section>
+
       <nav class="stage-tabs" aria-label="DSP chain">
         <span class="stage-static">Input</span>
         <span class="chain-arrow">→</span>
@@ -59,6 +70,9 @@
                 </button>
                 <button id="eq-redo" class="ghost mini" type="button">
                   Redo
+                </button>
+                <button id="module-reset" class="ghost mini" type="button">
+                  Reset EQ
                 </button>
               </div>
               <span class="freq f20">20</span>
