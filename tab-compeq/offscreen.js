@@ -61,6 +61,22 @@ function destroyEqNode(node) {
   for (const item of node.nodes) item.disconnect();
 }
 
+function disconnectNode(node) {
+  node?.disconnect();
+  return null;
+}
+
+function disconnectNodes(nodes) {
+  nodes?.forEach((node) => node.disconnect());
+  return null;
+}
+
+function peakDb(bytes) {
+  let peak = 0;
+  for (const value of bytes) peak = Math.max(peak, Math.abs((value - 128) / 128));
+  return 20 * Math.log10(peak || 0.000001);
+}
+
 function disconnectGraph() {
   source?.disconnect();
   for (const node of Object.values(eqNodes)) disconnectEqNode(node);
@@ -273,31 +289,20 @@ function startAnalyser() {
     compressorAnalyserNode.getByteTimeDomainData(comp);
     limiterAnalyserNode.getByteTimeDomainData(limiter);
     analyserNode.getByteTimeDomainData(output);
-    let inputPeak = 0;
-    let compPeak = 0;
     let limiterPeak = 0;
-    let outputPeak = 0;
-    for (let i = 0; i < input.length; i += 1) {
-      const inputSample = Math.abs((input[i] - 128) / 128);
-      const compSample = Math.abs((comp[i] - 128) / 128);
-      inputPeak = Math.max(inputPeak, inputSample);
-      compPeak = Math.max(compPeak, compSample);
-    }
     for (const value of limiter) {
       limiterPeak = Math.max(limiterPeak, Math.abs((value - 128) / 128));
     }
-    for (const value of output) {
-      const outputSample = (value - 128) / 128;
-      outputPeak = Math.max(outputPeak, Math.abs(outputSample));
-    }
+    const inputDb = peakDb(input);
+    const compDb = peakDb(comp);
+    const outputDb = peakDb(output);
     const ceiling = 10 ** (limiterThreshold / 20);
     const targetGain = limiterPeak > ceiling ? ceiling / limiterPeak : 1;
     limiterGain = Math.min(targetGain, limiterGain + 0.08);
     limiterNode.gain.setTargetAtTime(limiterGain, audioContext.currentTime, 0.005);
     let compGrDb = 0;
     if (compressorEnabled) {
-      const compLevelDb = 20 * Math.log10(compPeak || 0.000001);
-      const over = compLevelDb - compressorThreshold;
+      const over = compDb - compressorThreshold;
       if (
         compressorKnee > 0 &&
         over > -compressorKnee / 2 &&
@@ -321,10 +326,10 @@ function startAnalyser() {
       .sendMessage({
         type: MSG.ANALYZER_DATA,
         bins: Array.from(data),
-        inputDb: 20 * Math.log10(inputPeak || 0.000001),
-        outputDb: 20 * Math.log10(outputPeak || 0.000001),
-        compDb: 20 * Math.log10(compPeak || 0.000001),
-        limiterDb: 20 * Math.log10(outputPeak || 0.000001),
+        inputDb,
+        outputDb,
+        compDb,
+        limiterDb: outputDb,
         compGrDb,
         limiterGrDb,
         grDb: compGrDb + limiterGrDb,
@@ -409,88 +414,23 @@ async function stopCapture() {
   globalThis.clearInterval(analyserTimer);
   analyserTimer = null;
 
-  if (source) {
-    source.disconnect();
-    source = null;
-  }
-
-  if (compressorManualGainNode) {
-    compressorManualGainNode.disconnect();
-    compressorManualGainNode = null;
-  }
-
-  if (compressorStageInputNode) {
-    compressorStageInputNode.disconnect();
-    compressorStageInputNode = null;
-  }
-
-  if (compressorInputGainNode) {
-    compressorInputGainNode.disconnect();
-    compressorInputGainNode = null;
-  }
-
-  if (compressorOutputGainNode) {
-    compressorOutputGainNode.disconnect();
-    compressorOutputGainNode = null;
-  }
-
-  if (compressorDryGainNode) {
-    compressorDryGainNode.disconnect();
-    compressorDryGainNode = null;
-  }
-
-  if (compressorWetGainNode) {
-    compressorWetGainNode.disconnect();
-    compressorWetGainNode = null;
-  }
-
-  if (compressorMixNode) {
-    compressorMixNode.disconnect();
-    compressorMixNode = null;
-  }
-
-  compressorGraph?.nodes?.forEach((node) => node.disconnect());
-  compressorGraph = null;
-
-  if (limiterInputGainNode) {
-    limiterInputGainNode.disconnect();
-    limiterInputGainNode = null;
-  }
-
-  if (limiterNode) {
-    limiterNode.disconnect();
-    limiterNode = null;
-  }
-
-  if (soloNode) {
-    soloNode.disconnect();
-    soloNode = null;
-  }
-
-  if (analyserNode) {
-    analyserNode.disconnect();
-    analyserNode = null;
-  }
-
-  if (inputAnalyserNode) {
-    inputAnalyserNode.disconnect();
-    inputAnalyserNode = null;
-  }
-
-  if (compressorAnalyserNode) {
-    compressorAnalyserNode.disconnect();
-    compressorAnalyserNode = null;
-  }
-
-  if (limiterAnalyserNode) {
-    limiterAnalyserNode.disconnect();
-    limiterAnalyserNode = null;
-  }
-
-  if (gainNode) {
-    gainNode.disconnect();
-    gainNode = null;
-  }
+  source = disconnectNode(source);
+  compressorManualGainNode = disconnectNode(compressorManualGainNode);
+  compressorStageInputNode = disconnectNode(compressorStageInputNode);
+  compressorInputGainNode = disconnectNode(compressorInputGainNode);
+  compressorOutputGainNode = disconnectNode(compressorOutputGainNode);
+  compressorDryGainNode = disconnectNode(compressorDryGainNode);
+  compressorWetGainNode = disconnectNode(compressorWetGainNode);
+  compressorMixNode = disconnectNode(compressorMixNode);
+  compressorGraph = disconnectNodes(compressorGraph?.nodes);
+  limiterInputGainNode = disconnectNode(limiterInputGainNode);
+  limiterNode = disconnectNode(limiterNode);
+  soloNode = disconnectNode(soloNode);
+  analyserNode = disconnectNode(analyserNode);
+  inputAnalyserNode = disconnectNode(inputAnalyserNode);
+  compressorAnalyserNode = disconnectNode(compressorAnalyserNode);
+  limiterAnalyserNode = disconnectNode(limiterAnalyserNode);
+  gainNode = disconnectNode(gainNode);
 
   if (widthNodes) {
     for (const node of Object.values(widthNodes)) node.disconnect();

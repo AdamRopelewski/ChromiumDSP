@@ -15,6 +15,12 @@ const ICONS = {
   "48": "assets/icon-48.png",
   "128": "assets/icon-128.png",
 };
+const ACTIVE_ICONS = {
+  "16": "assets/icon-active-16.png",
+  "32": "assets/icon-active-32.png",
+  "48": "assets/icon-active-48.png",
+  "128": "assets/icon-active-128.png",
+};
 
 let state = {
   active: false,
@@ -46,9 +52,7 @@ function setState(patch, notify = true) {
   state = { ...state, ...patch };
   chrome.action.setBadgeText({ text: state.active ? "ON" : "" })?.catch?.(() => {});
   chrome.action.setBadgeBackgroundColor({ color: "#22c55e" })?.catch?.(() => {});
-  chrome.action
-    .setIcon({ path: state.active ? "assets/icon-active.svg" : ICONS })
-    ?.catch?.(() => {});
+  chrome.action.setIcon({ path: state.active ? ACTIVE_ICONS : ICONS })?.catch?.(() => {});
   if (notify) sendState();
 }
 
@@ -207,6 +211,18 @@ async function sendToOffscreen(message) {
   }
 }
 
+async function sendToActiveOffscreen(message) {
+  if (!state.active) return;
+  const response = await sendToOffscreen(message);
+  if (response?.type === MSG.ERROR) throw new Error(response.error);
+}
+
+async function saveAndSend(message) {
+  await saveSettings();
+  await sendToActiveOffscreen(message);
+  return state;
+}
+
 async function startCapture() {
   if (state.active) return state;
 
@@ -282,17 +298,7 @@ async function setCompressor(patch) {
   validateCompressor(compressor);
 
   setState({ compressor, error: null }, false);
-  await saveSettings();
-
-  if (state.active) {
-    const response = await sendToOffscreen({
-      type: MSG.SET_COMPRESSOR,
-      compressor,
-    });
-    if (response?.type === MSG.ERROR) throw new Error(response.error);
-  }
-
-  return state;
+  return saveAndSend({ type: MSG.SET_COMPRESSOR, compressor });
 }
 
 async function setLimiter(patch) {
@@ -300,17 +306,7 @@ async function setLimiter(patch) {
   validateLimiter(limiter);
 
   setState({ limiter, error: null }, false);
-  await saveSettings();
-
-  if (state.active) {
-    const response = await sendToOffscreen({
-      type: MSG.SET_LIMITER,
-      limiter,
-    });
-    if (response?.type === MSG.ERROR) throw new Error(response.error);
-  }
-
-  return state;
+  return saveAndSend({ type: MSG.SET_LIMITER, limiter });
 }
 
 async function setGain(gain) {
@@ -318,14 +314,7 @@ async function setGain(gain) {
     throw new Error("Gain must be between 0 and 2.");
 
   setState({ gain, error: null }, false);
-  await saveSettings();
-
-  if (state.active) {
-    const response = await sendToOffscreen({ type: MSG.SET_GAIN, gain });
-    if (response?.type === MSG.ERROR) throw new Error(response.error);
-  }
-
-  return state;
+  return saveAndSend({ type: MSG.SET_GAIN, gain });
 }
 
 async function setWidth(width) {
@@ -333,14 +322,7 @@ async function setWidth(width) {
     throw new Error("Width must be between 0 and 2.");
 
   setState({ width, error: null }, false);
-  await saveSettings();
-
-  if (state.active) {
-    const response = await sendToOffscreen({ type: MSG.SET_WIDTH, width });
-    if (response?.type === MSG.ERROR) throw new Error(response.error);
-  }
-
-  return state;
+  return saveAndSend({ type: MSG.SET_WIDTH, width });
 }
 
 async function setEqEnabled(eqEnabled) {
@@ -348,14 +330,7 @@ async function setEqEnabled(eqEnabled) {
     throw new Error("EQ enabled must be boolean.");
 
   setState({ eqEnabled, error: null }, false);
-  await saveSettings();
-
-  if (state.active) {
-    const response = await sendToOffscreen({ type: MSG.SET_EQ_ENABLED, eqEnabled });
-    if (response?.type === MSG.ERROR) throw new Error(response.error);
-  }
-
-  return state;
+  return saveAndSend({ type: MSG.SET_EQ_ENABLED, eqEnabled });
 }
 
 async function setEq(band, patch) {
@@ -390,18 +365,7 @@ async function setEq(band, patch) {
     ]),
   );
   setState({ eq, error: null }, false);
-  await saveSettings();
-
-  if (state.active) {
-    const response = await sendToOffscreen({
-      type: MSG.SET_EQ,
-      band,
-      patch: next,
-    });
-    if (response?.type === MSG.ERROR) throw new Error(response.error);
-  }
-
-  return state;
+  return saveAndSend({ type: MSG.SET_EQ, band, patch: next });
 }
 
 async function stopCapture() {

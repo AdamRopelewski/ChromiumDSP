@@ -620,19 +620,19 @@ function render(state) {
 
 async function send(type) {
   debug("popup message", type);
-  const response = await chrome.runtime.sendMessage({
-    type,
-    target: TARGET.BACKGROUND,
-  });
+  const response = await sendBackground({ type });
   render(response);
 }
 
-async function sendPreset(type, name) {
-  const response = await chrome.runtime.sendMessage({
-    type,
+async function sendBackground(message) {
+  return chrome.runtime.sendMessage({
+    ...message,
     target: TARGET.BACKGROUND,
-    name,
   });
+}
+
+async function sendPreset(type, name) {
+  const response = await sendBackground({ type, name });
   render(response);
 }
 
@@ -657,9 +657,8 @@ async function sendEqPatch(bandId, patch) {
     ),
   };
   render(currentState);
-  const response = await chrome.runtime.sendMessage({
+  const response = await sendBackground({
     type: MSG.SET_EQ,
-    target: TARGET.BACKGROUND,
     band: bandId,
     patch,
   });
@@ -670,9 +669,8 @@ async function sendEqState(eq) {
   currentState = { ...currentState, eq };
   render(currentState);
   for (const band of EQ_BANDS) {
-    const response = await chrome.runtime.sendMessage({
+    const response = await sendBackground({
       type: MSG.SET_EQ,
-      target: TARGET.BACKGROUND,
       band: band.id,
       patch: eq[band.id],
     });
@@ -684,9 +682,8 @@ async function setGain() {
   const value = linearForDb(Number(gain.value));
   gainValue.textContent = Number(gain.value).toFixed(1);
   debug("popup gain", { db: Number(gain.value), linear: value });
-  const response = await chrome.runtime.sendMessage({
+  const response = await sendBackground({
     type: MSG.SET_GAIN,
-    target: TARGET.BACKGROUND,
     gain: value,
   });
   if (response?.error) render(response);
@@ -696,9 +693,8 @@ async function setWidth() {
   const value = Number(width.value);
   widthValue.textContent = value.toFixed(2);
   debug("popup width", value);
-  const response = await chrome.runtime.sendMessage({
+  const response = await sendBackground({
     type: MSG.SET_WIDTH,
-    target: TARGET.BACKGROUND,
     width: value,
   });
   if (response?.error) render(response);
@@ -710,9 +706,8 @@ async function setEqEnabled() {
   chainEqStage.classList.toggle("stage-on", eqEnabled.checked);
   chainEqStage.classList.toggle("stage-off", !eqEnabled.checked);
   drawEq();
-  const response = await chrome.runtime.sendMessage({
+  const response = await sendBackground({
     type: MSG.SET_EQ_ENABLED,
-    target: TARGET.BACKGROUND,
     eqEnabled: eqEnabled.checked,
   });
   if (response?.error) render(response);
@@ -761,9 +756,8 @@ async function setCompressor() {
   chainCompStage.classList.toggle("stage-off", !compressor.enabled);
   drawCompressor();
   debug("popup compressor", compressor);
-  const response = await chrome.runtime.sendMessage({
+  const response = await sendBackground({
     type: MSG.SET_COMPRESSOR,
-    target: TARGET.BACKGROUND,
     compressor,
   });
   if (response?.error) render(response);
@@ -779,9 +773,8 @@ async function setLimiter() {
   currentState = { ...(currentState ?? {}), limiter };
   drawCompressor();
   debug("popup limiter", limiter);
-  const response = await chrome.runtime.sendMessage({
+  const response = await sendBackground({
     type: MSG.SET_LIMITER,
-    target: TARGET.BACKGROUND,
     limiter,
   });
   if (response?.error) render(response);
@@ -869,6 +862,20 @@ function resetBand(bandId) {
   beginEqEdit();
   sendEqPatch(bandId, { ...DEFAULT_DSP.eq[bandId] });
   endEqEdit();
+}
+
+function setThresholdFromCanvas(event) {
+  const rect = compressorCanvas.getBoundingClientRect();
+  const threshold = dbForCompressorY(
+    ((event.clientY - rect.top) / rect.height) * compressorCanvas.height,
+  );
+  if (activeStage === "limiter") {
+    limiterThreshold.value = clamp(threshold, -24, 0);
+    setLimiter();
+    return;
+  }
+  compressorThreshold.value = threshold;
+  setCompressor();
 }
 
 start.addEventListener("click", () => send(MSG.START_CAPTURE));
@@ -977,33 +984,11 @@ limiterThreshold.addEventListener("input", () => setLimiter());
 compressorCanvas.addEventListener("pointerdown", (event) => {
   draggingCompressor = true;
   compressorCanvas.setPointerCapture(event.pointerId);
-  const threshold = dbForCompressorY(
-    ((event.clientY - compressorCanvas.getBoundingClientRect().top) /
-      compressorCanvas.getBoundingClientRect().height) *
-      compressorCanvas.height,
-  );
-  if (activeStage === "limiter") {
-    limiterThreshold.value = clamp(threshold, -24, 0);
-    setLimiter();
-  } else {
-    compressorThreshold.value = threshold;
-    setCompressor();
-  }
+  setThresholdFromCanvas(event);
 });
 compressorCanvas.addEventListener("pointermove", (event) => {
   if (!draggingCompressor) return;
-  const threshold = dbForCompressorY(
-    ((event.clientY - compressorCanvas.getBoundingClientRect().top) /
-      compressorCanvas.getBoundingClientRect().height) *
-      compressorCanvas.height,
-  );
-  if (activeStage === "limiter") {
-    limiterThreshold.value = clamp(threshold, -24, 0);
-    setLimiter();
-  } else {
-    compressorThreshold.value = threshold;
-    setCompressor();
-  }
+  setThresholdFromCanvas(event);
 });
 compressorCanvas.addEventListener("pointerup", () => {
   draggingCompressor = false;
