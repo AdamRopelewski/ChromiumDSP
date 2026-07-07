@@ -7,6 +7,10 @@ export default [
       sourceType: "module",
       globals: {
         AudioContext: "readonly",
+        AudioWorkletNode: "readonly",
+        AudioWorkletProcessor: "readonly",
+        registerProcessor: "readonly",
+        sampleRate: "readonly",
         chrome: "readonly",
         console: "readonly",
         document: "readonly",

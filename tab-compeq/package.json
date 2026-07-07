@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Per-tab audio processing for Chrome.",
   "scripts": {
-    "test": "npm run lint",
+    "test": "node audio/dynamics.test.js && npm run lint",
     "lint": "eslint .",
     "format": "prettier -w ."
   },
