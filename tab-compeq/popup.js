@@ -10,6 +10,20 @@ import {
 } from "./audio/compressor.js";
 
 const DEBUG = false;
+// Canvas palette, mirrors the CSS tokens in popup.css :root so canvas draws and
+// DOM chrome stay in sync. Update both when the theme changes.
+const PALETTE = {
+  blue: "#38bdf8",
+  green: "#22c55e",
+  amber: "#eab308",
+  red: "#ef4444",
+  text: "#e7eaf0",
+  muted: "#9aa3b2",
+  line: "#2d3038",
+  grid: "rgba(255,255,255,0.08)",
+  disabled: "#52525b",
+  ink: "#09090b",
+};
 const MIN_FREQ = 20;
 const MAX_FREQ = 20000;
 const MIN_Q = 0.1;
@@ -36,6 +50,7 @@ const gainValue = document.querySelector("#gain-value");
 const width = document.querySelector("#width");
 const widthValue = document.querySelector("#width-value");
 const eqBandName = document.querySelector("#eq-band-name");
+const eqBandBadge = document.querySelector("#eq-band-badge");
 const eqType = document.querySelector("#eq-type");
 const eqMode = document.querySelector("#eq-mode");
 const eqFreq = document.querySelector("#eq-freq");
@@ -51,7 +66,6 @@ const moduleReset = document.querySelector("#module-reset");
 const bandPanel = document.querySelector("#band-panel");
 const compGainPanel = document.querySelector("#comp-gain-panel");
 const eqToolbar = document.querySelector(".eq-toolbar");
-const freqLabels = document.querySelectorAll(".freq");
 const chainEqStage = document.querySelector("#chain-eq-stage");
 const chainCompStage = document.querySelector("#chain-comp-stage");
 const eqEnabled = document.querySelector("#eq-enabled");
@@ -89,9 +103,9 @@ const limiterInputGain = document.querySelector("#limiter-input-gain");
 const limiterInputGainValue = document.querySelector("#limiter-input-gain-value");
 const limiterThreshold = document.querySelector("#limiter-threshold");
 const limiterThresholdValue = document.querySelector("#limiter-threshold-value");
-const globalInputMeter = document.querySelector("#global-input-meter");
+const peakCanvas = document.querySelector("#peak-canvas");
+const peakCtx = peakCanvas.getContext("2d");
 const globalInputMeterValue = document.querySelector("#global-input-meter-value");
-const globalOutputMeter = document.querySelector("#global-output-meter");
 const globalOutputMeterValue = document.querySelector("#global-output-meter-value");
 const globalGrMeter = document.querySelector("#global-gr-meter");
 const globalGrMeterValue = document.querySelector("#global-gr-meter-value");
@@ -111,6 +125,12 @@ let compressorWaveform = [];
 let compressorGr = [];
 let limiterWaveform = [];
 let limiterGr = [];
+// Peak-hold state for the vertical meters (dB, decays toward -inf each tick).
+// Zoomed to a -36..0 window so the useful loud range gets most of the height.
+const METER_MIN_DB = -36;
+const HOLD_DECAY_DB = 0.5; // per ~30ms tick
+let peakHold = { input: METER_MIN_DB, output: METER_MIN_DB };
+let peakLevel = { input: METER_MIN_DB, output: METER_MIN_DB };
 
 function debug(...args) {
   if (DEBUG) console.log("[TabTone]", ...args);
@@ -263,7 +283,7 @@ function coeffs(band, freq) {
 }
 
 function drawGrid() {
-  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.strokeStyle = PALETTE.grid;
   ctx.lineWidth = 1;
   for (const gainDb of [12, 6, 0, -6, -12]) {
     const y = yForGain(gainDb);
@@ -271,7 +291,7 @@ function drawGrid() {
     ctx.moveTo(0, y);
     ctx.lineTo(canvas.width, y);
     ctx.stroke();
-    ctx.fillStyle = gainDb === 0 ? "#f4f4f5" : "#a1a1aa";
+    ctx.fillStyle = gainDb === 0 ? PALETTE.text : PALETTE.muted;
     ctx.font = "11px system-ui";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -281,19 +301,47 @@ function drawGrid() {
       clamp(y, 10, canvas.height - 10),
     );
   }
-  for (const freq of [20, 100, 1000, 10000, 20000]) {
+  // Frequency gridlines + labels, drawn from the same log map so labels sit
+  // exactly on their lines. Edges (20/20k) dropped — they crowd the border.
+  ctx.font = "11px system-ui";
+  ctx.textBaseline = "bottom";
+  ctx.textAlign = "center";
+  ctx.fillStyle = PALETTE.muted;
+  for (const freq of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) {
     const x = xForFreq(freq);
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, canvas.height);
     ctx.stroke();
+    const label = freq >= 1000 ? `${freq / 1000}k` : `${freq}`;
+    ctx.fillText(label, x, canvas.height - 6);
   }
+}
+
+// Display-only tilt: a fixed total swing across the audible band — TILT_DB_LOW at
+// 20 Hz up to TILT_DB_HIGH at 20 kHz (0 dB at the geometric centre ~632 Hz),
+// linear in log-frequency. Treble lifted, bass pulled down so the spectrum reads
+// flatter. Bytes are already a dB scale (50 dB window, see spectrumAnalyser), so
+// the tilt is an ADD in byte space (1 dB ≈ 255/50 bytes). Gated by signal level
+// so silence (0) stays flat at the bottom. Purely cosmetic; audio is untouched.
+const TILT_LOW_HZ = 20;
+const TILT_HIGH_HZ = 20000;
+const TILT_DB_LOW = -4.5;
+const TILT_DB_HIGH = 4.5;
+const BYTES_PER_DB = 255 / 50;
+const TILT_GATE_BYTES = 8; // below this, fade the tilt out so the floor is flat
+function tiltBytes(freq) {
+  const t = Math.log2(freq / TILT_LOW_HZ) / Math.log2(TILT_HIGH_HZ / TILT_LOW_HZ);
+  const db = TILT_DB_LOW + (TILT_DB_HIGH - TILT_DB_LOW) * clamp(t, 0, 1);
+  return db * BYTES_PER_DB;
 }
 
 function drawSpectrum() {
   if (!spectrum.length) return;
-  ctx.beginPath();
-  ctx.moveTo(0, canvas.height);
+  // Use near-full canvas height (small top margin) so the spectrum fills the
+  // field instead of hugging the bottom. Trace the outline once, reuse it for
+  // both the gradient fill and the top stroke.
+  const points = [];
   for (let x = 0; x <= canvas.width; x += 2) {
     const freq = freqForX(x);
     const bin = clamp(
@@ -301,16 +349,31 @@ function drawSpectrum() {
       0,
       spectrum.length - 1,
     );
+    const gate = clamp(spectrum[bin] / TILT_GATE_BYTES, 0, 1);
+    const value = clamp(spectrum[bin] + tiltBytes(freq) * gate, 0, 255);
     const y = clamp(
-      canvas.height - (spectrum[bin] / 255) * canvas.height * 0.75 - 18,
+      canvas.height - (value / 255) * canvas.height * 0.94,
       0,
       canvas.height,
     );
-    ctx.lineTo(x, y);
+    points.push([x, y]);
   }
+
+  ctx.beginPath();
+  ctx.moveTo(0, canvas.height);
+  for (const [x, y] of points) ctx.lineTo(x, y);
   ctx.lineTo(canvas.width, canvas.height);
-  ctx.fillStyle = "rgba(56,189,248,0.22)";
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "rgba(56,189,248,0.45)");
+  gradient.addColorStop(1, "rgba(56,189,248,0.02)");
+  ctx.fillStyle = gradient;
   ctx.fill();
+
+  ctx.beginPath();
+  points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+  ctx.strokeStyle = PALETTE.blue;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 }
 
 function drawCurve() {
@@ -327,7 +390,8 @@ function drawCurve() {
     if (x === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   }
-  ctx.strokeStyle = currentState?.eqEnabled === false ? "#52525b" : "#38bdf8";
+  ctx.strokeStyle =
+    currentState?.eqEnabled === false ? PALETTE.disabled : PALETTE.blue;
   ctx.lineWidth = 3;
   ctx.stroke();
 }
@@ -345,9 +409,9 @@ function drawNodes() {
       0,
       Math.PI * 2,
     );
-    ctx.fillStyle = data.solo ? "#f59e0b" : active ? "#f4f4f5" : "#34d399";
+    ctx.fillStyle = data.solo ? PALETTE.amber : active ? PALETTE.text : PALETTE.green;
     ctx.fill();
-    ctx.fillStyle = "#09090b";
+    ctx.fillStyle = PALETTE.ink;
     ctx.font = "10px system-ui";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -387,21 +451,71 @@ function dbForCompressorY(y) {
   return Math.round(clamp((1 - y / compressorCanvas.height) * 60 - 60, -60, 0));
 }
 
+// Color for a level bar segment at a given dB: green nominal, amber -12..-6,
+// red above -6 (same thresholds as the old paintLevel).
+function levelColor(db) {
+  if (db > -6) return PALETTE.red;
+  if (db >= -12) return PALETTE.amber;
+  return PALETTE.green;
+}
+
+// One vertical segmented meter (LED look) with a peak-hold marker.
+function drawMeter(x, w, db, holdDb) {
+  const h = peakCanvas.height;
+  const norm = clamp((db - METER_MIN_DB) / -METER_MIN_DB, 0, 1);
+  peakCtx.fillStyle = "#0b0d12";
+  peakCtx.fillRect(x, 0, w, h);
+  peakCtx.fillStyle = levelColor(db);
+  const fillH = norm * h;
+  peakCtx.fillRect(x, h - fillH, w, fillH);
+  // LED gaps: punch background-colored slits every 5px.
+  peakCtx.fillStyle = "#0b0d12";
+  for (let y = h - 4; y > 0; y -= 5) peakCtx.fillRect(x, y, w, 1);
+  // Peak-hold marker.
+  const holdNorm = clamp((holdDb - METER_MIN_DB) / -METER_MIN_DB, 0, 1);
+  peakCtx.fillStyle = levelColor(holdDb);
+  peakCtx.fillRect(x, h - holdNorm * h - 1, w, 2);
+}
+
+function drawPeakMeters() {
+  const w = peakCanvas.width;
+  const h = peakCanvas.height;
+  peakCtx.clearRect(0, 0, w, h);
+  const scaleW = 22; // left margin reserved for the dB labels
+  const barGap = 10;
+  const barW = 44;
+  const startX = scaleW + (w - scaleW - (barW * 2 + barGap)) / 2;
+  drawMeter(startX, barW, peakLevel.input, peakHold.input);
+  drawMeter(startX + barW + barGap, barW, peakLevel.output, peakHold.output);
+  // dB scale in its own left margin so the numbers are actually readable.
+  peakCtx.font = "9px system-ui";
+  peakCtx.textAlign = "right";
+  peakCtx.textBaseline = "middle";
+  for (const db of [0, -6, -12, -24, -36]) {
+    const y = h - clamp((db - METER_MIN_DB) / -METER_MIN_DB, 0, 1) * h;
+    const cy = clamp(y, 6, h - 6);
+    peakCtx.strokeStyle = PALETTE.grid;
+    peakCtx.beginPath();
+    peakCtx.moveTo(scaleW, cy);
+    peakCtx.lineTo(w, cy);
+    peakCtx.stroke();
+    peakCtx.fillStyle = PALETTE.muted;
+    peakCtx.fillText(`${db}`, scaleW - 3, cy);
+  }
+}
+
 function updateMeters(message) {
-  const paintLevel = (meter, db) => {
-    meter.classList.toggle("yellow", db >= -12 && db <= -6);
-    meter.classList.toggle("red", db > -6);
-  };
   if (Number.isFinite(message.inputDb)) {
-    globalInputMeter.style.width = `${clamp((message.inputDb + 60) / 60, 0, 1) * 100}%`;
-    paintLevel(globalInputMeter, message.inputDb);
+    peakLevel.input = clamp(message.inputDb, METER_MIN_DB, 0);
+    peakHold.input = Math.max(message.inputDb, peakHold.input - HOLD_DECAY_DB);
     globalInputMeterValue.textContent = message.inputDb.toFixed(1);
   }
   if (Number.isFinite(message.outputDb)) {
-    globalOutputMeter.style.width = `${clamp((message.outputDb + 60) / 60, 0, 1) * 100}%`;
-    paintLevel(globalOutputMeter, message.outputDb);
+    peakLevel.output = clamp(message.outputDb, METER_MIN_DB, 0);
+    peakHold.output = Math.max(message.outputDb, peakHold.output - HOLD_DECAY_DB);
     globalOutputMeterValue.textContent = message.outputDb.toFixed(1);
   }
+  drawPeakMeters();
   if (Number.isFinite(message.grDb)) {
     globalGrMeter.style.width = `${clamp(message.grDb / 30, 0, 1) * 100}%`;
     globalGrMeterValue.textContent = message.grDb.toFixed(1);
@@ -421,7 +535,7 @@ function drawCompressor() {
     compressorCanvas.width,
     compressorCanvas.height,
   );
-  compressorCtx.strokeStyle = "rgba(255,255,255,0.08)";
+  compressorCtx.strokeStyle = PALETTE.grid;
   compressorCtx.lineWidth = 1;
   for (const db of [-60, -48, -36, -24, -12, 0]) {
     const y = yForDb(db);
@@ -444,7 +558,8 @@ function drawCompressor() {
     if (x === 0) compressorCtx.moveTo(x, y);
     else compressorCtx.lineTo(x, y);
   }
-  compressorCtx.strokeStyle = limiter || settings.enabled ? "#38bdf8" : "#52525b";
+  compressorCtx.strokeStyle =
+    limiter || settings.enabled ? PALETTE.blue : PALETTE.disabled;
   compressorCtx.lineWidth = 3;
   compressorCtx.stroke();
 
@@ -465,7 +580,8 @@ function drawCompressor() {
   const thresholdY = yForDb(settings.threshold);
   compressorCtx.moveTo(0, thresholdY);
   compressorCtx.lineTo(compressorCanvas.width, thresholdY);
-  compressorCtx.strokeStyle = limiter || settings.enabled ? "#f59e0b" : "#52525b";
+  compressorCtx.strokeStyle =
+    limiter || settings.enabled ? PALETTE.amber : PALETTE.disabled;
   compressorCtx.lineWidth = 2;
   compressorCtx.stroke();
 
@@ -476,11 +592,11 @@ function drawCompressor() {
     if (i === 0) compressorCtx.moveTo(x, y);
     else compressorCtx.lineTo(x, y);
   }
-  compressorCtx.strokeStyle = "#f87171";
+  compressorCtx.strokeStyle = PALETTE.red;
   compressorCtx.lineWidth = 2;
   compressorCtx.stroke();
 
-  compressorCtx.fillStyle = "#d4d4d8";
+  compressorCtx.fillStyle = PALETTE.muted;
   compressorCtx.font = "11px system-ui";
   compressorCtx.textAlign = "right";
   compressorCtx.textBaseline = "middle";
@@ -502,8 +618,9 @@ function showStage(stage) {
   eqToolbar.hidden = false;
   eqUndo.hidden = activeStage !== "eq";
   eqRedo.hidden = activeStage !== "eq";
-  moduleReset.textContent = `Reset ${stage === "comp" ? "Comp" : stage === "eq" ? "EQ" : "Limiter"}`;
-  for (const label of freqLabels) label.hidden = activeStage !== "eq";
+  const stageLabel = stage === "comp" ? "Comp" : stage === "eq" ? "EQ" : "Limiter";
+  moduleReset.title = `Reset ${stageLabel}`;
+  moduleReset.setAttribute("aria-label", `Reset ${stageLabel}`);
 }
 
 function selectedBand() {
@@ -514,7 +631,8 @@ function renderSelectedBand() {
   const band = selectedBand();
   if (!band) return;
   const index = EQ_BANDS.findIndex((item) => item.id === selectedBandId);
-  eqBandName.textContent = `Band ${index + 1} - ${EQ_BANDS[index]?.label ?? selectedBandId}`;
+  eqBandBadge.textContent = String(index + 1);
+  eqBandName.textContent = EQ_BANDS[index]?.label ?? selectedBandId;
   eqType.value = band.type;
   eqMode.value = band.mode ?? "stereo";
   eqFreq.value = normForFreq(band.freq);

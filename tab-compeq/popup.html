@@ -57,59 +57,111 @@
         <section class="eq-column">
           <section class="analyzer-card" aria-label="EQ analyzer">
             <div class="analyzer-grid">
-              <canvas id="eq-canvas" width="560" height="260"></canvas>
+              <canvas id="eq-canvas" width="560" height="240"></canvas>
               <canvas
                 id="compressor-canvas"
                 width="560"
-                height="260"
+                height="240"
                 hidden
               ></canvas>
               <div class="eq-toolbar">
-                <button id="eq-undo" class="ghost mini" type="button">
-                  Undo
+                <button
+                  id="eq-undo"
+                  class="ghost mini icon-btn"
+                  type="button"
+                  aria-label="Undo"
+                  title="Undo"
+                >
+                  <img src="assets/undo.png" alt="" />
                 </button>
-                <button id="eq-redo" class="ghost mini" type="button">
-                  Redo
+                <button
+                  id="eq-redo"
+                  class="ghost mini icon-btn"
+                  type="button"
+                  aria-label="Redo"
+                  title="Redo"
+                >
+                  <img src="assets/redo.png" alt="" />
                 </button>
-                <button id="module-reset" class="ghost mini" type="button">
-                  Reset EQ
+                <button
+                  id="module-reset"
+                  class="ghost mini icon-btn"
+                  type="button"
+                  aria-label="Reset EQ"
+                  title="Reset EQ"
+                >
+                  <img src="assets/reset.png" alt="" />
                 </button>
               </div>
-              <span class="freq f20">20</span>
-              <span class="freq f100">100</span>
-              <span class="freq f1k">1k</span>
-              <span class="freq f10k">10k</span>
             </div>
           </section>
 
-          <fieldset class="stage-panel active" data-panel="eq">
-            <legend>EQ Stage</legend>
-            <label class="toggle-row">
-              <input id="eq-enabled" type="checkbox" checked /> Enabled
-            </label>
-            <label>
-              Input Gain: <span id="gain-value">0.0</span>dB
-              <input
-                id="gain"
-                type="range"
-                min="-60"
-                max="6"
-                step="0.1"
-                value="0"
-              />
-            </label>
-            <label>
-              Width: <span id="width-value">1.00</span>x
-              <input
-                id="width"
-                type="range"
-                min="0"
-                max="2"
-                step="0.01"
-                value="1"
-              />
-            </label>
-          </fieldset>
+          <section
+            id="band-panel"
+            class="band-panel"
+            aria-label="Selected EQ band"
+          >
+            <header class="band-head">
+              <span id="eq-band-badge" class="band-badge">3</span>
+              <strong id="eq-band-name">Band 3</strong>
+            </header>
+            <div class="band-row">
+              <label>
+                Type
+                <select id="eq-type">
+                  <option value="peaking">Peaking</option>
+                  <option value="lowshelf">Low Shelf</option>
+                  <option value="highshelf">High Shelf</option>
+                </select>
+              </label>
+              <label>
+                Mode
+                <select id="eq-mode">
+                  <option value="stereo">Stereo</option>
+                  <option value="mid">Mid</option>
+                  <option value="side">Side</option>
+                </select>
+              </label>
+              <label class="toggle-row band-solo">
+                <input id="eq-solo" type="checkbox" /> Solo
+              </label>
+            </div>
+            <div class="band-row-3">
+              <label>
+                Freq: <span id="eq-freq-value">1000</span>Hz
+                <input
+                  id="eq-freq"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.001"
+                  value="0.566"
+                />
+              </label>
+              <label>
+                Gain: <span id="eq-gain-value">0.0</span>dB
+                <input
+                  id="eq-gain"
+                  type="range"
+                  min="-12"
+                  max="12"
+                  step="0.1"
+                  value="0"
+                />
+              </label>
+              <label>
+                Q: <span id="eq-q-value">0.70</span>
+                <input
+                  id="eq-q"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.001"
+                  value="0.295"
+                />
+              </label>
+            </div>
+          </section>
 
           <fieldset class="stage-panel" data-panel="comp">
             <legend>Compressor Stage</legend>
@@ -195,14 +247,11 @@
 
         <aside class="side-panel">
           <section class="band-panel meter-panel" aria-label="Global meters">
-            <label>
-              Input peak: <span id="global-input-meter-value">-inf</span>dB
-              <span class="meter-track"><span id="global-input-meter" class="meter-fill"></span></span>
-            </label>
-            <label>
-              Output peak: <span id="global-output-meter-value">-inf</span>dB
-              <span class="meter-track"><span id="global-output-meter" class="meter-fill"></span></span>
-            </label>
+            <canvas id="peak-canvas" width="156" height="200"></canvas>
+            <div class="peak-readouts">
+              <span>In <b id="global-input-meter-value">-inf</b></span>
+              <span>Out <b id="global-output-meter-value">-inf</b></span>
+            </div>
             <label>
               Total GR: <span id="global-gr-meter-value">0.0</span>dB
               <span class="meter-track"><span id="global-gr-meter" class="meter-fill gr"></span></span>
@@ -232,65 +281,34 @@
               />
             </label>
           </section>
-          <section
-            id="band-panel"
-            class="band-panel"
-            aria-label="Selected EQ band"
-          >
-            <strong id="eq-band-name">Band 3</strong>
-            <label>
-              Type
-              <select id="eq-type">
-                <option value="peaking">Peaking</option>
-                <option value="lowshelf">Low Shelf</option>
-                <option value="highshelf">High Shelf</option>
-              </select>
+          <fieldset class="stage-panel active" data-panel="eq">
+            <legend>EQ Stage</legend>
+            <label class="toggle-row">
+              <input id="eq-enabled" type="checkbox" checked /> Enabled
             </label>
             <label>
-              Mode
-              <select id="eq-mode">
-                <option value="stereo">Stereo</option>
-                <option value="mid">Mid</option>
-                <option value="side">Side</option>
-              </select>
-            </label>
-            <label>
-              Freq: <span id="eq-freq-value">1000</span>Hz
+              Input Gain: <span id="gain-value">0.0</span>dB
               <input
-                id="eq-freq"
+                id="gain"
                 type="range"
-                min="0"
-                max="1"
-                step="0.001"
-                value="0.566"
-              />
-            </label>
-            <label>
-              Gain: <span id="eq-gain-value">0.0</span>dB
-              <input
-                id="eq-gain"
-                type="range"
-                min="-12"
-                max="12"
+                min="-60"
+                max="6"
                 step="0.1"
                 value="0"
               />
             </label>
             <label>
-              Q: <span id="eq-q-value">0.70</span>
+              Width: <span id="width-value">1.00</span>x
               <input
-                id="eq-q"
+                id="width"
                 type="range"
                 min="0"
-                max="1"
-                step="0.001"
-                value="0.295"
+                max="2"
+                step="0.01"
+                value="1"
               />
             </label>
-            <label class="toggle-row">
-              <input id="eq-solo" type="checkbox" /> Solo
-            </label>
-          </section>
+          </fieldset>
         </aside>
       </section>
 

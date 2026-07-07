@@ -25,11 +25,11 @@ export function createMetering(graph) {
   };
 
   function tick() {
-    const { inputAnalyser, outputAnalyser } = graph;
-    const bins = new Uint8Array(outputAnalyser.frequencyBinCount);
+    const { inputAnalyser, outputAnalyser, spectrumAnalyser } = graph;
+    const bins = new Uint8Array(spectrumAnalyser.frequencyBinCount);
     const inTime = new Uint8Array(inputAnalyser.fftSize);
     const outTime = new Uint8Array(outputAnalyser.fftSize);
-    outputAnalyser.getByteFrequencyData(bins);
+    spectrumAnalyser.getByteFrequencyData(bins);
     inputAnalyser.getByteTimeDomainData(inTime);
     outputAnalyser.getByteTimeDomainData(outTime);
 

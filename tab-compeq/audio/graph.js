@@ -31,9 +31,20 @@ function createWidthMatrix(ctx) {
 export function createGraph(ctx) {
   const inputAnalyser = ctx.createAnalyser();
   const outputAnalyser = ctx.createAnalyser();
+  // Spectrum is tapped here (post-EQ, pre-compressor) so EQ changes show on the
+  // FFT cleanly instead of being flattened by the compressor/limiter.
+  const spectrumAnalyser = ctx.createAnalyser();
   inputAnalyser.fftSize = 2048;
   outputAnalyser.fftSize = 4096;
   outputAnalyser.smoothingTimeConstant = 0.82;
+  // Narrower dB window than the -100..-30 default → getByteFrequencyData spreads
+  // real signal across the full 0..255 range = more visible spectrum detail.
+  outputAnalyser.minDecibels = -85;
+  outputAnalyser.maxDecibels = -35;
+  spectrumAnalyser.fftSize = 4096;
+  spectrumAnalyser.smoothingTimeConstant = 0.82;
+  spectrumAnalyser.minDecibels = -85;
+  spectrumAnalyser.maxDecibels = -35;
 
   const soloNode = ctx.createBiquadFilter();
   const compressorNode = new AudioWorkletNode(ctx, "compressor");
@@ -74,6 +85,7 @@ export function createGraph(ctx) {
     for (const node of Object.values(eqNodes)) node.output.disconnect();
     soloNode.disconnect();
     inputAnalyser.disconnect();
+    spectrumAnalyser.disconnect();
     compressorNode.disconnect();
     width.merger.disconnect();
     gainNode.disconnect();
@@ -93,6 +105,7 @@ export function createGraph(ctx) {
       }
       if (applySolo()) node = node.connect(soloNode);
     }
+    node.connect(spectrumAnalyser);
     node.connect(compressorNode);
     compressorNode.connect(width.splitter);
     width.merger.connect(gainNode);
@@ -113,6 +126,7 @@ export function createGraph(ctx) {
   return {
     inputAnalyser,
     outputAnalyser,
+    spectrumAnalyser,
     compressorNode,
     limiterNode,
     start({ src, gain, widthValue, eqOn, eq }) {

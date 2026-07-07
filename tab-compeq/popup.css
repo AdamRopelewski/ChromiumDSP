@@ -193,7 +193,7 @@ button:disabled {
 }
 
 .analyzer-card {
-  min-height: 260px;
+  min-height: 240px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -209,7 +209,7 @@ button:disabled {
 #compressor-canvas {
   display: block;
   width: 100%;
-  height: 260px;
+  height: 240px;
   cursor: crosshair;
 }
 
@@ -230,24 +230,22 @@ button:disabled {
   font-size: 11px;
 }
 
-.freq {
-  position: absolute;
-  bottom: 10px;
-  color: var(--muted);
-  font-size: 11px;
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  line-height: 0;
 }
 
-.f20 {
-  left: 3%;
+.icon-btn img {
+  width: 15px;
+  height: 15px;
+  opacity: 0.85;
 }
-.f100 {
-  left: 23%;
-}
-.f1k {
-  left: 56%;
-}
-.f10k {
-  left: 89%;
+
+.icon-btn:hover img {
+  opacity: 1;
 }
 
 .side-panel {
@@ -268,6 +266,50 @@ button:disabled {
   gap: 6px;
 }
 
+.band-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.band-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--blue);
+  color: #09090b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.band-head strong {
+  font-size: 13px;
+}
+
+.band-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  gap: 6px 10px;
+}
+
+.band-row-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 10px;
+}
+
+.band-solo {
+  align-self: center;
+  white-space: nowrap;
+}
+
 .meter-panel {
   gap: 8px;
 }
@@ -286,22 +328,39 @@ button:disabled {
   width: 0%;
   height: 100%;
   border-radius: inherit;
-  background: var(--green);
-}
-
-.meter-fill.yellow {
-  background: var(--amber);
-}
-
-.meter-fill.red,
-.meter-fill.gr {
   background: var(--red);
+}
+
+#peak-canvas {
+  display: block;
+  width: 100%;
+  height: 200px;
+  border-radius: 12px;
+  background: #0b0d12;
+}
+
+.peak-readouts {
+  display: flex;
+  justify-content: space-around;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.peak-readouts b {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .error {
   min-height: 1.2em;
   margin: 10px 0 0;
   color: var(--red);
+}
+
+/* No message → take no space, so EQ mode stays under the 600px popup cap
+   (otherwise the reserved height forces a vertical scrollbar). */
+.error:empty {
+  display: none;
 }
 
 .controls-grid {
@@ -326,6 +385,11 @@ button:disabled {
 
 .stage-panel.active[data-panel="comp"] {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* EQ controls now live in the narrow side panel → stack them. */
+.stage-panel.active[data-panel="eq"] {
+  grid-template-columns: 1fr;
 }
 
 legend {
